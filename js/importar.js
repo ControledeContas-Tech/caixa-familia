@@ -1,0 +1,141 @@
+// ================= IMPORTAÇÃO: leitura de CSV e OFX + análise contra o que já existe =================
+// Funções puras: recebem texto e o estado, devolvem propostas. Nada é gravado aqui.
+
+const IMP_PEND = ["dup", "parc"]; // situações que exigem decisão antes de gravar
+const IMP_GRAVA = ["ok", "keep", "parcok", "avista", "comp", "estorno"];
+
+function parseDataBR(s) {
+  s = String(s || "").trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); if (m) { const y = m[3].length === 2 ? "20" + m[3] : m[3]; return `${y}-${pad(+m[2])}-${pad(+m[1])}`; }
+  m = s.match(/^(\d{4})(\d{2})(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return null;
+}
+// valor com sinal, em centavos: "1.234,56", "-12.34", "R$ -1.234,56", "(12,34)", "12,34 D"
+function parseValor(s) {
+  s = String(s ?? "").trim(); if (!s) return NaN;
+  let neg = /^\(.*\)$/.test(s) || /-/.test(s) || /\bD$/i.test(s);
+  s = s.replace(/[^\d,.]/g, "");
+  if (!s) return NaN;
+  const lc = s.lastIndexOf(","), ld = s.lastIndexOf(".");
+  if (lc > ld) s = s.replace(/\./g, "").replace(",", ".");
+  else if (ld > lc && lc >= 0) s = s.replace(/,/g, "");
+  else if (lc === -1 && ld >= 0 && s.length - ld - 1 === 3 && s.split(".").length > 2) s = s.replace(/\./g, "");
+  const v = Math.round(Number(s) * 100);
+  return isFinite(v) ? (neg ? -v : v) : NaN;
+}
+function splitCSV(linha, sep) {
+  const out = []; let cur = "", q = false;
+  for (let i = 0; i < linha.length; i++) {
+    const ch = linha[i];
+    if (q) { if (ch === '"' && linha[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+    else if (ch === '"') q = true; else if (ch === sep) { out.push(cur); cur = ""; } else cur += ch;
+  }
+  out.push(cur); return out.map(c => c.trim());
+}
+function parseCSV(texto) {
+  const linhas = texto.replace(/^﻿/, "").split(/\r?\n/).filter(l => l.trim());
+  if (!linhas.length) return { itens: [], erro: "Arquivo vazio." };
+  const sep = [";", ",", "\t"].map(s => [s, splitCSV(linhas[0], s).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const rows = linhas.map(l => splitCSV(l, sep));
+  const cab = rows[0].map(h => norm(h));
+  const acha = re => cab.findIndex(h => re.test(h));
+  let iData = acha(/^(DATA|DATE|DT)\b|DATA (DA )?(COMPRA|LANC|TRANS|MOV)/), iDesc = acha(/DESCRI|TITLE|HISTOR|LANCAMENTO|ESTABELEC|MEMO|DETALHE/), iVal = acha(/^VALOR|AMOUNT|VALUE|QUANTIA|VALOR \(R\$\)/);
+  let corpo = rows.slice(1);
+  if (iData < 0 || iVal < 0) { // sem cabeçalho reconhecível: adivinha pelas colunas
+    corpo = rows; const r0 = rows[0];
+    iData = r0.findIndex(c => parseDataBR(c)); iVal = r0.findIndex((c, i) => i !== iData && /\d/.test(c) && !isNaN(parseValor(c)) && !parseDataBR(c));
+    iDesc = r0.findIndex((c, i) => i !== iData && i !== iVal && /[a-z]/i.test(c));
+    if (iData < 0 || iVal < 0) return { itens: [], erro: "Não reconheci as colunas de data e valor neste CSV." };
+  }
+  if (iDesc < 0) iDesc = rows[0].findIndex((_, i) => i !== iData && i !== iVal);
+  const iId = acha(/IDENTIFICADOR|^ID$|FITID|DOCUMENTO/);
+  const itens = []; let ignorados = 0;
+  for (const r of corpo) {
+    const d = parseDataBR(r[iData]), v = parseValor(r[iVal]);
+    if (!d || isNaN(v) || v === 0) { ignorados++; continue; }
+    itens.push({ d, desc: (r[iDesc] || "").replace(/\s+/g, " ").trim() || "(sem descrição)", vs: v, fitid: iId >= 0 ? r[iId] || null : null });
+  }
+  return { itens, ignorados, colunas: { data: rows[0][iData], descricao: rows[0][iDesc], valor: rows[0][iVal] } };
+}
+function parseOFX(texto) {
+  const tag = (bloco, t) => { const m = bloco.match(new RegExp("<" + t + ">([^<\\r\\n]*)", "i")); return m ? m[1].trim() : ""; };
+  const blocos = texto.split(/<STMTTRN>/i).slice(1).map(b => b.split(/<\/STMTTRN>/i)[0]);
+  const itens = blocos.map(b => {
+    const d = parseDataBR(tag(b, "DTPOSTED")), v = parseValor(tag(b, "TRNAMT").replace(",", "."));
+    const nome = tag(b, "NAME"), memo = tag(b, "MEMO");
+    return { d, desc: (memo && nome && !norm(memo).includes(norm(nome)) ? nome + " " + memo : memo || nome || "(sem descrição)").replace(/\s+/g, " "), vs: v, fitid: tag(b, "FITID") || null };
+  }).filter(i => i.d && !isNaN(i.vs) && i.vs !== 0);
+  return { itens, cartao: /<CCSTMTRS>/i.test(texto), banco: tag(texto, "ORG") || tag(texto, "BANKID"), conta: tag(texto, "ACCTID") };
+}
+function lerArquivo(nome, texto) {
+  const ext = (nome.split(".").pop() || "").toLowerCase();
+  if (ext === "ofx" || /<OFX>/i.test(texto.slice(0, 2000))) return { formato: "OFX", ...parseOFX(texto) };
+  if (ext === "csv" || ext === "txt") return { formato: "CSV", ...parseCSV(texto) };
+  return { formato: ext.toUpperCase(), itens: [], erro: "Leitura de " + ext.toUpperCase() + " (PDF e imagens) chega na próxima etapa. Por enquanto, exporte o extrato ou a fatura em CSV ou OFX no app do banco." };
+}
+
+// palavras significativas de uma descrição
+const toks = s => norm(s).replace(/[^A-Z0-9 ]/g, " ").split(/\s+/).filter(w => w.length >= 3 && !/^\d+$/.test(w) && !["PARCELA", "PARC", "COMPRA", "PAG", "PGTO"].includes(w));
+function parecido(a, b) { const A = toks(a), B = toks(b); if (!A.length || !B.length) return norm(a) === norm(b); const c = A.filter(w => B.some(x => x.startsWith(w) || w.startsWith(x))).length; return c / Math.min(A.length, B.length) >= 0.5; }
+const diasEntre = (a, b) => Math.abs((Date.parse(a) - Date.parse(b)) / 864e5);
+function achaParcela(desc) {
+  const m = desc.match(/(?:PARCELA\s*|PARC\.?\s*)?\b(\d{1,2})\s*(?:\/|DE)\s*(\d{1,2})\s*$/i) || desc.match(/PARCELA\s*(\d{1,2})\s*(?:\/|DE)\s*(\d{1,2})/i);
+  if (!m) return null; const k = +m[1], n = +m[2];
+  return n >= 2 && n <= 48 && k >= 1 && k <= n ? { k, n, limpa: desc.replace(m[0], "").replace(/[-–\s]+$/, "").trim() } : null;
+}
+function faturaMaisProxima(S, card, valor) {
+  const r = cardResumo(S, card); if (!r.abertas.length) return null;
+  return [...r.abertas].sort((a, b) => Math.abs(a.saldo - valor) - Math.abs(b.saldo - valor))[0];
+}
+
+// analisa os itens lidos de um arquivo para um destino (conta ou cartão)
+function analisar(S, itens, destino, faturaKey) {
+  const card = cardOf(S, destino), conta = S.contas.find(c => c.id === destino);
+  const desp = catsDespesa(S), outrasD = desp.includes("Outras despesas") ? "Outras despesas" : desp[0] || "", outrasR = catsReceita(S)[0] || "";
+  const existentes = S.lanc.filter(l => !l.excluido && (card ? l.cartao === destino : l.conta === destino || l.destino === destino));
+  const ativos = conta ? compromissos(S, addYM(CUR, -2), addYM(CUR, 1)).filter(c => ativo(c) && c.kind !== "fat" && c.restante > 0) : [];
+  const usados = new Set();
+  return itens.map(it => {
+    const o = { d: it.d, desc: it.desc, v: Math.abs(it.vs), fitid: it.fitid, alvo: destino, st: "ok", note: "", tipo: "despesa" };
+    if (it.fitid && existentes.some(l => l.fitid === it.fitid)) return { ...o, st: "link", note: "Já importado antes (mesmo identificador do banco)" };
+    const sug = sugerirCat(S, it.desc);
+    if (card) {
+      if (it.vs < 0) {
+        if (/PAGAMENTO|PGTO|PAG FAT|PAGTO/i.test(norm(it.desc))) return { ...o, st: "skip", orig: "info", note: "Pagamento da fatura: é registrado a partir do extrato da conta" };
+        const orig = existentes.find(l => l.tipo === "despesa" && l.valor === o.v && parecido(l.desc, it.desc));
+        return { ...o, tipo: "estorno", st: "estorno", cat: orig ? orig.cat : sug ? sug.cat : outrasD, sub: orig ? orig.sub : "", estornoDe: orig ? orig.id : null, note: orig ? `Estorno da compra de ${brs(orig.data)}` : "Crédito na fatura (estorno), sem compra original encontrada" };
+      }
+      const pc = achaParcela(it.desc);
+      if (pc) {
+        const ex = S.parc.find(p => p.cartao === destino && p.n === pc.n && Math.abs(parcVal(p, 2) - o.v) <= 1 && parecido(p.desc, pc.limpa || it.desc));
+        if (ex) return { ...o, st: "link", note: `Parcela ${pc.k}/${pc.n} de “${ex.desc}” já projetada · não será recriada` };
+        const base = faturaKey || keyOf(card, it.d);
+        return { ...o, st: "parc", n: pc.n, k: pc.k, desc: pc.limpa || it.desc, k0: addYM(base, -(pc.k - 1)), cat: sug ? sug.cat : outrasD, sub: sug ? sug.sub : "", note: `Parcela ${pc.k}/${pc.n} encontrada: cria parcelamento de ${pc.n} × ${fmt(o.v)} = ${fmt(o.v * pc.n)}, 1ª na fatura de ${ymLabel(addYM(base, -(pc.k - 1)))}` };
+      }
+      const dup = existentes.find(l => (l.tipo === "despesa") && l.valor === o.v && diasEntre(l.data, it.d) <= 2 && parecido(l.desc, it.desc));
+      if (dup) return { ...o, st: "dup", cat: dup.cat, note: `Parecido com “${dup.desc}” de ${brs(dup.data)}, já registrado` };
+      return { ...o, cat: sug && sug.cat !== "Transferência" ? sug.cat : outrasD, sub: sug ? sug.sub : "", note: sug ? `Categoria pela regra “${sug.regra}”` : "" };
+    }
+    // conta bancária
+    const ehFatura = /PAG(AMENTO|TO)?\s*(DE\s*)?FAT|FATURA\s*CART|PGTO\s*CART/i.test(norm(it.desc)) || (sug && sug.cat === "Transferência");
+    if (it.vs < 0 && ehFatura && S.cartoes.length) {
+      const c = S.cartoes.find(k => norm(it.desc).includes(norm(k.inst))) || S.cartoes.find(k => k.pagaCom === destino) || S.cartoes[0];
+      const jaPago = S.lanc.find(l => !l.excluido && l.tipo === "transferencia" && l.destino === c.id && l.valor === o.v && diasEntre(l.data, it.d) <= 3);
+      if (jaPago) return { ...o, st: "link", tipo: "transferencia", cat: "Transferência", note: `Já registrado como pagamento da fatura ${c.nome}` };
+      const f = faturaMaisProxima(S, c, o.v);
+      return { ...o, tipo: "transferencia", cat: "Transferência", cartaoDestino: c.id, fatura: f ? f.key : keyOf(c, it.d), note: `Pagamento de fatura → transferência para ${c.nome}${f ? ", fatura de " + ymLabel(f.key) : ""}. Não conta como despesa.` };
+    }
+    const tipo = it.vs < 0 ? "despesa" : "receita";
+    const dup = existentes.find(l => (l.tipo === tipo || l.tipo === "transferencia") && l.valor === o.v && diasEntre(l.data, it.d) <= 2 && (parecido(l.desc, it.desc) || l.tipo === "transferencia"));
+    if (dup) return { ...o, tipo, st: "dup", cat: dup.cat || "", note: `Parecido com “${dup.desc}” de ${brs(dup.data)}, já registrado` };
+    const comp = ativos.find(c => !usados.has(c.key) && c.tipo === tipo && (c.restante === o.v || (c.estimado && Math.abs(c.restante - o.v) <= c.restante * 0.2)) && diasEntre(c.venc, it.d) <= 6);
+    if (comp) { usados.add(comp.key); return { ...o, tipo, st: "comp", comp: comp.key, cat: comp.cat, sub: comp.sub, note: `${tipo === "receita" ? "Recebe" : "Quita"} “${comp.desc}” (previsto ${fmt(comp.restante)}, vence ${brs(comp.venc)})` }; }
+    const cats = tipo === "receita" ? catsReceita(S) : desp;
+    return { ...o, tipo, cat: sug && cats.includes(sug.cat) ? sug.cat : tipo === "receita" ? outrasR : outrasD, sub: sug ? sug.sub : "", note: sug && cats.includes(sug.cat) ? `Categoria pela regra “${sug.regra}”` : "" };
+  });
+}
+const catsDespesa = S => S.categorias.filter(c => c[1] !== "receita").map(c => c[0]);
+const catsReceita = S => S.categorias.filter(c => c[1] === "receita").map(c => c[0]);
+
+if (typeof module !== "undefined") module.exports = { parseCSV, parseOFX, parseValor, parseDataBR, lerArquivo, analisar, achaParcela, parecido, IMP_PEND, IMP_GRAVA };
