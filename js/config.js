@@ -4,5 +4,5 @@
 // NUNCA coloque aqui a chave "service_role" (secreta).
 window.CAIXA_CONFIG = {
   url: "https://tchtzxwnjdcdggszhtie.supabase.co",
-  chave: "COLE_AQUI_A_CHAVE_ANON_PUBLIC",
+  chave: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjaHR6eHduamRjZGdnc3podGllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0OTY4MTMsImV4cCI6MjEwODA3MjgxM30.zNS4DrHbKkGT0TxBS1kebwCPAWR2s5Se0aWt0JvTTD0",
 };
