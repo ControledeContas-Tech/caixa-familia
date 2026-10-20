@@ -11,7 +11,7 @@ function carregar(hoje = "2026-10-19") {
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   const codigo = ["core.js", "importar.js", "db.js"].map(f => fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8").replace(/if \(typeof module[^\n]*\n?/g, "")).join("\n;\n");
-  vm.runInContext(codigo + "\n;Object.assign(globalThis, { seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY });", ctx);
+  vm.runInContext(codigo + "\n;Object.assign(globalThis, { seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela });", ctx);
   return ctx;
 }
 const C = carregar();
@@ -175,4 +175,40 @@ test("gravar e ler do banco preserva todos os números", () => {
   igual(S2.cartoes.map(c => C.cardResumo(S2, c).deve), S.cartoes.map(c => C.cardResumo(S, c).deve));
   igual(C.projecao(S2, 500000).meses.map(m => m.fim), C.projecao(S, 500000).meses.map(m => m.fim));
   for (const t of C.ORDEM) igual(C.TABELAS[t].rows(S2), C.TABELAS[t].rows(S), "tabela " + t);
+});
+
+test("recorrência parcelada: 07/10 a 10/10 de out/26 a jan/27, depois some", () => {
+  const S = C.vazio("João", "2026-10-01");
+  S.rec.push({ id: "r-emp", desc: "Empréstimo Pernambucanas", tipo: "despesa", cat: "Dívidas", sub: "", valor: 50618, dia: 25, conta: "c1", inicio: "2026-10", fim: "2027-01", resp: "João", natureza: "Fixa", parcTotal: 10, parcIni: 7 });
+  const cs = C.compromissos(S, "2026-10", "2027-12").filter(c => c.ref.id === "r-emp");
+  igual(cs.map(c => c.desc), ["Empréstimo Pernambucanas 07/10", "Empréstimo Pernambucanas 08/10", "Empréstimo Pernambucanas 09/10", "Empréstimo Pernambucanas 10/10"]);
+  igual(cs.map(c => c.venc), ["2026-10-25", "2026-11-25", "2026-12-25", "2027-01-25"]);
+  // mesmo se o fim gravado estiver errado, nunca passa da última parcela
+  S.rec[0].fim = null;
+  assert.equal(C.compromissos(S, "2026-10", "2027-12").filter(c => c.ref.id === "r-emp").length, 4);
+  // projeção não conta nada depois de janeiro
+  const pj = C.projecao(S, 0).meses.filter(m => m.ym > "2027-01");
+  assert.ok(pj.every(m => m.fixas === 0));
+});
+
+test("recorrência parcelada criada depois de já existir: meses antigos ficam, sem número", () => {
+  const S = C.vazio("João", "2026-08-01");
+  S.rec.push({ id: "r-x", desc: "Curso", tipo: "despesa", cat: "Educação", sub: "", valor: 1000, dia: 5, conta: "c1", inicio: "2026-08", fim: "2026-12", resp: "João", natureza: "Fixa", parcTotal: 3, parcIni: -1 });
+  igual(C.compromissos(S, "2026-08", "2027-03").filter(c => c.ref.id === "r-x").map(c => c.desc), ["Curso", "Curso", "Curso 01/03", "Curso 02/03", "Curso 03/03"]);
+});
+
+test("separa '(07/10)' da descrição", () => {
+  igual(C.separaParcela("Pernambucanas Empréstimo (07/10)"), { desc: "Pernambucanas Empréstimo", n: 7, total: 10 });
+  igual(C.separaParcela("Geladeira - 3/12"), { desc: "Geladeira", n: 3, total: 12 });
+  igual(C.separaParcela("Carro 5 de 48"), { desc: "Carro", n: 5, total: 48 });
+  assert.equal(C.separaParcela("IPTU 2026"), null);
+  assert.equal(C.separaParcela("Aluguel 10/2026"), null);
+  assert.equal(C.separaParcela("Conta 11/10"), null);
+});
+
+test("banco: parcelas da recorrência vão e voltam iguais", () => {
+  const S = C.vazio("João", "2026-10-01");
+  S.rec.push({ id: "r-emp", desc: "Empréstimo", tipo: "despesa", cat: "Dívidas", sub: "", valor: 50618, dia: 25, conta: null, inicio: "2026-10", fim: "2027-01", resp: "João", natureza: "Fixa", parcTotal: 10, parcIni: 0 });
+  const row = C.TABELAS.recorrencias.rows(S)[0];
+  assert.equal(row.parc_total, 10); assert.equal(row.parc_ini, 0);
 });
