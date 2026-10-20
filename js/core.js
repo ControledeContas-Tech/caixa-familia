@@ -283,13 +283,23 @@ function compStatus(c) {
   if (c.pago > 0) return "parcial";
   return ymOf(c.venc) <= CUR ? "pendente" : "prevista";
 }
+// recorrência parcelada: número da parcela no mês (null se não for parcelada)
+const recParcela = (r, ym) => r.parcTotal ? (r.parcIni ?? 1) + ymDiff(r.inicio, ym) : null;
+// "Empréstimo (07/10)" → { desc: "Empréstimo", n: 7, total: 10 }
+function separaParcela(t) {
+  const m = String(t || "").match(/^(.*?)[\s\-–·]*\(?\s*(\d{1,3})\s*(?:\/|de)\s*(\d{1,3})\s*\)?\s*$/i);
+  if (!m || !m[1].trim()) return null;
+  const n = +m[2], total = +m[3]; if (!(total >= 2 && total <= 360 && n >= 1 && n <= total)) return null;
+  return { desc: m[1].trim(), n, total };
+}
 function compromissos(S, from, to) {
   const out = [];
   for (let ym = from; ym <= to; ym = addYM(ym, 1)) {
     for (const r of S.rec) {
       if (ym < r.inicio || (r.fim && ym > r.fim) || ym < ymOf(S.inicio)) continue;
+      const np = recParcela(r, ym); if (np !== null && np > r.parcTotal) continue; // meses antes da 1ª parcela (se houver) aparecem sem número
       const k = r.id + "|" + ym, i = S.inst[k] || {}, valor = i.valor ?? r.valor, pago = sum(i.pag || [], p => p.valor), desc = i.desconto || 0;
-      const c = { key: k, kind: "rec", ref: r, desc: r.desc, cat: r.cat, sub: r.sub, tipo: r.tipo, valor, pago, desconto: desc, restante: valor - desc - pago, venc: i.venc || mk(ym, r.dia), origem: r.tipo === "receita" ? "receita recorrente" : "recorrência", estimado: !i.valor && r.natureza === "Variável", inst: i, conta: r.conta, resp: r.resp };
+      const c = { key: k, kind: "rec", ref: r, desc: r.desc + (np >= 1 ? " " + pad(np) + "/" + pad(r.parcTotal) : ""), parcela: np, cat: r.cat, sub: r.sub, tipo: r.tipo, valor, pago, desconto: desc, restante: valor - desc - pago, venc: i.venc || mk(ym, r.dia), origem: r.tipo === "receita" ? "receita recorrente" : "recorrência", estimado: !i.valor && r.natureza === "Variável", inst: i, conta: r.conta, resp: r.resp };
       c.status = compStatus(Object.assign({}, c, i)); if (r.tipo === "receita" && c.status === "paga") c.status = "recebida";
       out.push(c);
     }

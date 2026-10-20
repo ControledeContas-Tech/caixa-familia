@@ -43,6 +43,8 @@ const hzDate = () => HZ[ui.hz][1]();
 
 // ---------- gráficos ----------
 function barChart(data, { h = 220, money = true, onClick = "", hi = 0 } = {}) {
+  if (!data.length) return `<p class="note">Sem dados para o gráfico ainda.</p>`;
+  hi = Math.min(Math.max(0, hi), data.length - 1);
   const W = 760, L = 64, R = 12, T = 22, B = 30;
   const vals = data.map(d => d.v), max0 = Math.max(1, ...vals), min0 = Math.min(0, ...vals);
   const step = niceStep((max0 - min0) / 4), max = Math.ceil(max0 / step) * step, min = Math.floor(min0 / step) * step;
@@ -212,10 +214,16 @@ function vLanc() {
 }
 
 // ---------- cartões ----------
+// faturas com movimento + a atual e as 2 seguintes (mesmo vazias), para cartão sem compras não ficar sem tela
+function faturasTela(card, r = cardResumo(S, card)) {
+  const fs = [], de = ymOf(S.inicio) < r.atual.key ? ymOf(S.inicio) : r.atual.key;
+  for (let k = de; k <= "2028-12"; k = addYM(k, 1)) { const fx = fatura(S, card, k); if (fx.itens.length || fx.pago || (k >= r.atual.key && k <= addYM(r.atual.key, 2))) fs.push(fx); }
+  return fs;
+}
 function vCartoes() {
   if (!S.cartoes.length) return `${topbar("Cartões")}<section class="panel empty"><b>Nenhum cartão cadastrado</b><span>Cadastre o cartão com o dia de fechamento e de vencimento. A partir daí, cada compra cai na fatura certa.</span><button class="btn primary" data-act="novocartao">Cadastrar cartão</button></section>`;
   const card = cardOf(S, ui.card) || S.cartoes[0], r = cardResumo(S, card);
-  const fs = faturasDo(S, card, ymOf(S.inicio), "2028-12");
+  const fs = faturasTela(card, r);
   if (!ui.cardKey || !fs.some(f => f.key === ui.cardKey)) ui.cardKey = r.atual.key;
   const f = fatura(S, card, ui.cardKey), idx = fs.findIndex(x => x.key === f.key);
   const pags = S.lanc.filter(l => !l.excluido && l.tipo === "transferencia" && l.destino === card.id && l.fatura === f.key);
@@ -292,7 +300,7 @@ function vContas() {
   ${tab === "receber" ? `<section class="panel flush">${tabela(rec)}</section><p class="note">Receitas previstas não entram no saldo de caixa nem no saldo livre até serem recebidas.</p>` : ""}
   ${tab === "rec" ? `<section class="panel flush">${head("Recorrências", `<button class="btn" data-act="novarec">+ Nova recorrência</button>`).replace('class="panel-head"', 'class="panel-head pad"')}
     <div class="tbl-wrap"><table class="rows"><thead><tr><th>Descrição</th><th>Tipo</th><th>Natureza</th><th class="r">Valor</th><th>Dia</th><th>Período</th><th>Conta</th><th></th></tr></thead><tbody>
-    ${S.rec.map(r => `<tr><td>${esc(r.desc)}<div class="sub">${esc(r.cat)}${r.sub ? " · " + esc(r.sub) : ""}</div></td><td>${r.tipo === "receita" ? "Receita" : "Despesa"}</td><td>${r.natureza}</td><td class="r num">${fmt(r.valor)}</td><td class="num">${pad(r.dia)}</td><td class="sub">mensal · ${ymLabel(r.inicio)} a ${r.fim ? ymLabel(r.fim) : "sem fim"}</td><td class="sub">${esc(nomeDe(r.conta))}</td><td class="r"><button class="mini" data-act="editrec" data-arg="${r.id}">Editar</button></td></tr>`).join("")}
+    ${S.rec.map(r => `<tr><td>${esc(r.desc)}<div class="sub">${esc(r.cat)}${r.sub ? " · " + esc(r.sub) : ""}</div></td><td>${r.tipo === "receita" ? "Receita" : "Despesa"}</td><td>${r.natureza}</td><td class="r num">${fmt(r.valor)}</td><td class="num">${pad(r.dia)}</td><td class="sub">${r.parcTotal ? `${r.parcTotal} parcelas · ${pad(Math.max(1, r.parcIni || 1))}/${pad(r.parcTotal)} a ${pad(r.parcTotal)}/${pad(r.parcTotal)}<br>${ymLabel(r.inicio)} a ${ymLabel(r.fim)}` : `mensal · ${ymLabel(r.inicio)} a ${r.fim ? ymLabel(r.fim) : "sem fim"}`}</td><td class="sub">${esc(nomeDe(r.conta))}</td><td class="r"><button class="mini" data-act="editrec" data-arg="${r.id}">Editar</button></td></tr>`).join("")}
     </tbody></table></div></section><p class="note">Editar uma recorrência muda só os meses a partir do escolhido. Meses já pagos ficam como estão.</p>` : ""}`;
 }
 
@@ -756,16 +764,26 @@ const forms = {
     return v < fat.saldo ? `Pagamento parcial de ${fmt(v)}. Restam ${fmt(fat.saldo - v)} nesta fatura.` : "Fatura paga. O caixa diminuiu e nenhuma despesa nova foi criada.";
   },
   rec(f) {
-    const r = f.dataset.id ? S.rec.find(x => x.id === f.dataset.id) : null, v = parseBRL(f.elements.valor.value), dia = +f.elements.dia.value, a = f.elements.apartir.value, fim = f.elements.fim.value || null;
+    const r = f.dataset.id ? S.rec.find(x => x.id === f.dataset.id) : null, v = parseBRL(f.elements.valor.value), dia = +f.elements.dia.value, a = f.elements.apartir.value;
+    let desc = f.elements.desc.value.trim(), tot = +f.elements.parc.value || 0, pn = +f.elements.pn.value || 1, fim = f.elements.fim.value || null;
     if (!(v > 0) || dia < 1 || dia > 31) return toast("Confira o valor e o dia do vencimento."), false;
+    if (!a) return toast("Informe o mês."), false;
+    const sp = separaParcela(desc);
+    if (!tot && !r && sp) { tot = sp.total; pn = sp.n; }               // "Empréstimo (07/10)" vira parcelado 7 de 10
+    if (tot && sp && sp.total === tot) desc = sp.desc;                  // o número da parcela passa a ser mostrado por mês
+    if (tot) { if (pn < 1 || pn > tot) return toast(`A parcela tem que estar entre 1 e ${tot}.`), false; fim = addYM(a, tot - pn); }
+    if (fim && fim < a) return toast("O mês de fim é antes do início."), false;
+    const resumo = tot ? `parcelas ${pad(pn)}/${pad(tot)} a ${pad(tot)}/${pad(tot)} (${ymLabel(a)} a ${ymLabel(fim)})` : fim ? `até ${ymLabel(fim)}` : "sem fim";
     if (r) {
       for (let ym = r.inicio; ym < a; ym = addYM(ym, 1)) { const k = r.id + "|" + ym; if (ym >= ymOf(S.inicio)) { S.inst[k] = S.inst[k] || {}; if (S.inst[k].valor === undefined) S.inst[k].valor = r.valor; if (!S.inst[k].venc) S.inst[k].venc = mk(ym, r.dia); } }
       for (const k in S.inst) if (k.startsWith(r.id + "|") && (S.inst[k].pag || []).length && S.inst[k].valor === undefined) S.inst[k].valor = r.valor;
-      const ch = `${fmt(r.valor)} → ${fmt(v)}, dia ${r.dia} → ${dia}, fim ${r.fim ? ymLabel(r.fim) : "nenhum"} → ${fim ? ymLabel(fim) : "nenhum"}, a partir de ${ymLabel(a)}`;
-      Object.assign(r, { valor: v, dia, fim, desc: f.elements.desc.value.trim() }); audit("Editou recorrência", r.desc, ch); return "Recorrência atualizada a partir de " + ymLong(a) + ".";
+      const antes = r.parcTotal ? `parcelado em ${r.parcTotal}` : `fim ${r.fim ? ymLabel(r.fim) : "nenhum"}`;
+      const ch = `${fmt(r.valor)} → ${fmt(v)}, dia ${r.dia} → ${dia}, ${antes} → ${resumo}, a partir de ${ymLabel(a)}`;
+      Object.assign(r, { valor: v, dia, fim, desc, parcTotal: tot || null, parcIni: tot ? pn - ymDiff(r.inicio, a) : null });
+      audit("Editou recorrência", r.desc, ch); return "Recorrência atualizada: " + resumo + ".";
     }
-    const n = { id: uid("r-"), desc: f.elements.desc.value.trim(), tipo: f.elements.tipo.value, cat: f.elements.cat.value, sub: "", valor: v, dia, conta: f.elements.conta.value, inicio: a, fim, resp: S.user, natureza: f.elements.natureza.value };
-    S.rec.push(n); audit("Criou recorrência", n.desc, fmt(v) + " todo dia " + dia); return "Recorrência criada. As previsões dos próximos 12 meses já aparecem.";
+    const n = { id: uid("r-"), desc, tipo: f.elements.tipo.value, cat: f.elements.cat.value, sub: "", valor: v, dia, conta: f.elements.conta.value, inicio: a, fim, resp: S.user, natureza: f.elements.natureza.value, parcTotal: tot || null, parcIni: tot ? pn : null };
+    S.rec.push(n); audit("Criou recorrência", n.desc, fmt(v) + " todo dia " + dia + " · " + resumo); return "Recorrência criada: " + resumo + ".";
   },
   aporte(f) {
     const p = S.provisoes.find(x => x.id === f.dataset.id), v = parseBRL(f.elements.valor.value); if (!(v > 0)) return toast("Informe um valor."), false;
@@ -800,7 +818,7 @@ const acts = {
   catmes: a => { ui.lf = { mes: CUR, conta: "", cat: a, resp: "", tipo: "", q: "" }; go("lancamentos"); },
   projmes: a => { ui.compMes = a; ui.compTab = "pagar"; go("contas"); },
   fatkey: a => { ui.cardKey = a; render(); },
-  fatnav: a => { const card = cardOf(S, ui.card), fs = faturasDo(S, card, ymOf(S.inicio), "2028-12"), i = fs.findIndex(f => f.key === ui.cardKey) + +a; if (fs[i]) { ui.cardKey = fs[i].key; render(); } },
+  fatnav: a => { const card = cardOf(S, ui.card), fs = faturasTela(card), i = fs.findIndex(f => f.key === ui.cardKey) + +a; if (fs[i]) { ui.cardKey = fs[i].key; render(); } },
   pagarfat: a => pagarFatModal(a),
   compmes: a => { ui.compMes = addYM(ui.compMes, +a); if (ui.compMes < ymOf(S.inicio)) ui.compMes = ymOf(S.inicio); render(); },
   comptab: a => { ui.compTab = a; render(); },
@@ -837,16 +855,39 @@ forms.convite = f => { S.pessoas.push({ id: uid("u"), nome: f.elements.nome.valu
 
 function recModal(id) {
   const r = id ? S.rec.find(x => x.id === id) : null;
-  modal(r ? "Editar recorrência" : "Nova recorrência", `<form class="form" data-form="rec" ${r ? `data-id="${r.id}"` : ""}>
-    ${field("Descrição", `<input id="rc-d" name="desc" required value="${esc(r ? r.desc : "")}">`, true, "rc-d")}
+  const a0 = r ? (r.inicio > CUR ? r.inicio : CUR) : addYM(CUR, 1);
+  const tot = r && r.parcTotal ? r.parcTotal : "", pn0 = r && r.parcTotal ? Math.min(r.parcTotal, Math.max(1, recParcela(r, a0))) : 1;
+  const parcOpts = [["", "Não é parcelado"], ...Array.from({ length: 119 }, (_, k) => [String(k + 2), (k + 2) + " parcelas"])];
+  modal(r ? "Editar recorrência" : "Nova recorrência", `<form class="form" data-form="rec" id="frec" ${r ? `data-id="${r.id}"` : ""}>
+    ${field("Descrição", `<input id="rc-d" name="desc" required value="${esc(r ? r.desc : "")}" placeholder="Ex.: Empréstimo Pernambucanas">`, true, "rc-d")}
     ${r ? "" : field("Tipo", `<select id="rc-t" name="tipo">${opts([["despesa", "Despesa"], ["receita", "Receita"]])}</select>`, false, "rc-t") + field("Natureza", `<select id="rc-n" name="natureza">${opts(["Fixa", "Variável"])}</select>`, false, "rc-n") + field("Categoria", `<select id="rc-c" name="cat">${opts(S.categorias.map(c => c[0]))}</select>`, false, "rc-c") + field("Conta", `<select id="rc-co" name="conta">${opts(S.contas.filter(c => c.caixa).map(c => [c.id, c.nome]))}</select>`, false, "rc-co")}
-    ${field("Valor", money("valor", r ? r.valor : "", "rc-v"), false, "rc-v")}
+    ${field("Valor" + (r ? "" : " (de cada mês)"), money("valor", r ? r.valor : "", "rc-v"), false, "rc-v")}
     ${field("Dia do vencimento", `<input id="rc-dia" name="dia" type="number" min="1" max="31" value="${r ? r.dia : 10}" required>`, false, "rc-dia")}
-    ${field(r ? "Aplicar a partir de" : "Começa em", `<input id="rc-a" name="apartir" type="month" value="${r ? CUR : addYM(CUR, 1)}" required>`, false, "rc-a")}
-    ${field("Termina em (opcional)", `<input id="rc-f" name="fim" type="month" value="${r && r.fim ? r.fim : ""}">`, false, "rc-f")}
-    <div class="field full"><div class="hint-box">Periodicidade mensal. ${r ? "Meses anteriores e meses já pagos ficam como estão." : "As previsões aparecem nos próximos 12 meses e não contam como pagas."}</div></div>
+    ${field("Parcelas", `<select id="rc-p" name="parc">${opts(parcOpts, String(tot))}</select>`, false, "rc-p")}
+    <div class="field" id="rc-pn-wrap" ${tot ? "" : "hidden"}><label for="rc-pn">${r ? "Parcela no mês escolhido abaixo" : "Parcela do primeiro mês"}</label><input id="rc-pn" name="pn" type="number" min="1" max="360" value="${pn0}"></div>
+    ${field(r ? "Aplicar a partir de" : "Começa em", `<input id="rc-a" name="apartir" type="month" value="${a0}" required>`, false, "rc-a")}
+    ${field("Termina em" + (tot ? " (calculado pelas parcelas)" : " (opcional)"), `<input id="rc-f" name="fim" type="month" value="${r && r.fim ? r.fim : ""}" ${tot ? "readonly" : ""}>`, false, "rc-f")}
+    <div class="field full"><div class="hint-box" id="rc-hint"></div></div>
     <div class="field full row-actions"><button class="btn primary">${r ? "Salvar" : "Criar"}</button><button type="button" class="btn" data-close>Cancelar</button></div></form>`);
+  recAtualiza();
 }
+// mantém "Termina em", o campo de parcela e o resumo coerentes enquanto a pessoa preenche
+function recAtualiza(origem) {
+  const f = document.getElementById("frec"); if (!f) return;
+  const E = f.elements, wrap = document.getElementById("rc-pn-wrap"), hint = document.getElementById("rc-hint"), edit = !!f.dataset.id;
+  if (origem === "desc" && !E.parc.value) { const sp = separaParcela(E.desc.value); if (sp) { E.parc.value = String(sp.total); E.pn.value = sp.n; } }
+  const tot = +E.parc.value || 0, a = E.apartir.value;
+  wrap.hidden = !tot; E.fim.readOnly = !!tot;
+  const lbl = f.querySelector('label[for="rc-f"]'); if (lbl) lbl.textContent = "Termina em" + (tot ? " (calculado pelas parcelas)" : " (opcional)");
+  let txt = "Periodicidade mensal. ";
+  if (tot) {
+    const pn = Math.min(tot, Math.max(1, +E.pn.value || 1)); E.pn.max = tot;
+    if (a) { const fim = addYM(a, tot - pn); E.fim.value = fim; txt += `Parcelas ${pad(pn)}/${pad(tot)} a ${pad(tot)}/${pad(tot)}: ${tot - pn + 1} ${tot - pn ? "meses" : "mês"}, de ${ymLong(a)} a ${ymLong(fim)}. Cada mês aparece com o número da parcela e depois da última ela some sozinha.`; }
+  } else txt += E.fim.value && a ? `De ${ymLong(a)} a ${ymLong(E.fim.value)}.` : "Sem data de fim: continua todo mês até você encerrar.";
+  hint.textContent = txt + " " + (edit ? "Meses anteriores e meses já pagos ficam como estão." : "Previsões não contam como pagas.");
+}
+document.addEventListener("input", e => { if (e.target.form && e.target.form.id === "frec") recAtualiza(e.target.name); });
+document.addEventListener("change", e => { if (e.target.form && e.target.form.id === "frec") recAtualiza(e.target.name); });
 
 // ================= LOGIN, FAMÍLIA, NAVEGAÇÃO E EVENTOS =================
 const URL_APP = () => location.origin + location.pathname;
