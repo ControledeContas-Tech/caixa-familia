@@ -11,7 +11,7 @@ function carregar(hoje = "2026-10-19") {
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   const codigo = ["core.js", "importar.js", "db.js"].map(f => fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8").replace(/if \(typeof module[^\n]*\n?/g, "")).join("\n;\n");
-  vm.runInContext(codigo + "\n;Object.assign(globalThis, { seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte });", ctx);
+  vm.runInContext(codigo + "\n;Object.assign(globalThis, { seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte, lerTextoImagem });", ctx);
   return ctx;
 }
 const C = carregar();
@@ -222,4 +222,21 @@ test("CPF: dígitos verificadores e formatação", () => {
   assert.equal(C.cpfFmt("52998224725"), "529.982.247-25");
   assert.equal(C.diasAte("2026-10-20", "2026-11-19"), 30);
   assert.equal(C.diasAte("2026-10-20", "2026-10-19"), -1);
+});
+
+test("print de fatura (texto reconhecido): datas por dia, parcela na linha de baixo, pagamento negativo, resumo ignorado", () => {
+  const t = "Nubank\nFatura atual\nR$ 1.332,22\nLimite disponível R$ 3.200,00\n20 OUT\nMercado Livre R$ 120,00\nParcela 2/10\niFood R$ 45,90\n19 OUT\nUber *Trip R$ 23,40\nPagamento recebido —R$ 800,00\n18 OUT\nNetflix.com R$ 55,90";
+  const r = C.lerTextoImagem(t, "2026-10-21");
+  assert.equal(r.banco, "Nubank"); assert.equal(r.cartao, true);
+  igual(r.itens.map(i => [i.d, i.desc, i.vs]), [["2026-10-20", "Mercado Livre Parcela 2/10", 12000], ["2026-10-20", "iFood", 4590], ["2026-10-19", "Uber *Trip", 2340], ["2026-10-19", "Pagamento recebido", -80000], ["2026-10-18", "Netflix.com", 5590]]);
+});
+test("print de extrato: data na linha, sinal de saída, saldo ignorado, parcela 03/12 não vira valor", () => {
+  const r = C.lerTextoImagem("itaú extrato\n14/10/2026 PIX ENVIADO MARIA -150,00\n16/10/2026 SALARIO EMPRESA 5.200,00\nSALDO DO DIA 4.616,78\n17/10 MAGAZINE LUIZA 03/12 199,90", "2026-10-21");
+  assert.equal(r.banco, "Itaú");
+  igual(r.itens.map(i => [i.d, i.desc, i.vs]), [["2026-10-14", "PIX ENVIADO MARIA", -15000], ["2026-10-16", "SALARIO EMPRESA", 520000], ["2026-10-17", "MAGAZINE LUIZA 03/12", 19990]]);
+});
+test("print sem banco e datas de dezembro lidas em janeiro ficam no ano anterior", () => {
+  const r = C.lerTextoImagem("28/12 Farmácia 89,90\nHoje\nPadaria 12,00", "2027-01-05");
+  assert.equal(r.banco, null);
+  igual(r.itens.map(i => [i.d, i.desc, i.vs]), [["2026-12-28", "Farmácia", 8990], ["2027-01-05", "Padaria", 1200]]);
 });
