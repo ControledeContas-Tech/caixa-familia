@@ -345,6 +345,27 @@ textarea.code{width:100%;font:12px/1.5 var(--f-num);background:var(--sunken)}
 .steps li.ok span:first-child{color:var(--muted);text-decoration:line-through}
 .imp-head{align-items:flex-start}
 .imp-head h2{margin-bottom:4px}
+.paste-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:10px 0 0}
+.paste-bar .btn{display:inline-flex;gap:8px;align-items:center} .paste-bar .btn svg{width:16px;height:16px}
+.paste-bar .sub{flex:1 1 280px}
+.ocr-prog{display:grid;gap:6px}
+.ocr-prog .bar{height:8px;border-radius:99px;background:var(--sunken);overflow:hidden}
+.ocr-prog .bar i{display:block;height:100%;background:var(--accent);transition:width .3s}
+.imp-img{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.vinc{display:grid;gap:8px}
+.vinc-t{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+.vinc-l{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
+.vinc-c{display:flex;gap:10px;align-items:center;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px;cursor:pointer;color:inherit;font:inherit}
+.vinc-c:hover{border-color:var(--accent)} .vinc-c.on{border-color:var(--accent);background:var(--accent-soft)}
+.vinc-c svg{width:20px;height:20px;flex:none;color:var(--accent)} .vinc-c b{display:block}
+.imp-ed{width:100%;min-width:0;padding:5px 7px;font-size:13px} .imp-ed.wide{min-width:180px} input.imp-ed[type=date]{min-width:128px}
+td .imp-ed.r{text-align:right;max-width:120px;margin-left:auto;display:block}
+.imp-lado{display:block}
+.imp-thumb{display:block;margin:0 18px 12px;max-width:380px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.imp-thumb img{width:100%;display:block}
+table.imp td{vertical-align:top}
+table.imp select{min-width:150px}
+td .imp-ed.r{min-width:100px}
 .imp-dest{display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
 .imp-dest label{display:flex;gap:6px;align-items:center}
 .imp-dest select{padding:5px 8px}
