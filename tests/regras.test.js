@@ -11,7 +11,7 @@ function carregar(hoje = "2026-10-19") {
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   const codigo = ["core.js", "importar.js", "db.js"].map(f => fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8").replace(/if \(typeof module[^\n]*\n?/g, "")).join("\n;\n");
-  vm.runInContext(codigo + "\n;Object.assign(globalThis, { seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela });", ctx);
+  vm.runInContext(codigo + "\n;Object.assign(globalThis, { seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte });", ctx);
   return ctx;
 }
 const C = carregar();
@@ -211,4 +211,15 @@ test("banco: parcelas da recorrência vão e voltam iguais", () => {
   S.rec.push({ id: "r-emp", desc: "Empréstimo", tipo: "despesa", cat: "Dívidas", sub: "", valor: 50618, dia: 25, conta: null, inicio: "2026-10", fim: "2027-01", resp: "João", natureza: "Fixa", parcTotal: 10, parcIni: 0 });
   const row = C.TABELAS.recorrencias.rows(S)[0];
   assert.equal(row.parc_total, 10); assert.equal(row.parc_ini, 0);
+});
+
+test("CPF: dígitos verificadores e formatação", () => {
+  assert.equal(C.cpfValido("123.456.789-09"), true);
+  assert.equal(C.cpfValido("52998224725"), true);
+  assert.equal(C.cpfValido("123.456.789-00"), false);
+  assert.equal(C.cpfValido("111.111.111-11"), false);
+  assert.equal(C.cpfValido("1234567890"), false);
+  assert.equal(C.cpfFmt("52998224725"), "529.982.247-25");
+  assert.equal(C.diasAte("2026-10-20", "2026-11-19"), 30);
+  assert.equal(C.diasAte("2026-10-20", "2026-10-19"), -1);
 });
