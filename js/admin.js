@@ -2,7 +2,7 @@
 // Controle de todas as contas do sistema: liberar, renovar com prazo, bloquear, ver qualquer família (só leitura).
 // Tudo passa por funções do banco que conferem se quem pede é administrador geral (usuário + CPF).
 (function () {
-  const ADM = { tab: "usuarios", filtro: null, q: "", users: null, fams: null, log: null, carregando: false, erro: "" };
+  const ADM = { tab: "leads", resumo: null, conhecidos: null, email: null, canal: null, timer: null, filtro: null, q: "", users: null, fams: null, log: null, carregando: false, erro: "" };
   const ehSuper = () => !!(ui.acesso && ui.acesso.super);
 
   IC.admin = '<path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/>';
@@ -21,6 +21,18 @@
   .adm-acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
   .adm-membros{font-size:12.5px;color:var(--muted)}
   .adm-log td{font-size:13px;vertical-align:top}
+  .lead-list{display:grid;gap:10px}
+  .lead{display:flex;gap:14px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px}
+  .lead.novo{border-color:var(--warn);box-shadow:inset 4px 0 0 var(--warn)}
+  .lead h3{margin:0 0 2px;font-size:16px} .lead .sub{word-break:break-all}
+  .tag-novo{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;color:#fff;background:var(--warn);border-radius:4px;padding:1px 6px;margin-left:8px;vertical-align:2px}
+  .lead-acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .alerta-leads{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--warn-soft);color:var(--warn);border-radius:10px;padding:12px 16px;margin:0 0 16px;font-size:14px}
+  .alerta-leads b{color:inherit}
+  .seg .cnt{display:inline-block;margin-left:6px;min-width:18px;padding:0 5px;border-radius:99px;background:var(--crit);color:#fff;font-size:11px;line-height:18px;text-align:center}
+  .more-btn .adm-dot{position:absolute;top:6px;right:calc(50% - 16px);width:9px;height:9px;border-radius:50%;background:var(--crit)}
+  .more-btn{position:relative}
+  .avisos-cfg{display:grid;gap:8px}
   .totals.adm{grid-template-columns:repeat(6,minmax(0,1fr));margin:0 0 14px} @media (max-width:760px){.totals.adm{grid-template-columns:repeat(3,minmax(0,1fr))}}
   `;
   document.head.appendChild(css);
@@ -29,9 +41,10 @@
   async function carregar() {
     if (ADM.carregando) return; ADM.carregando = true; ADM.erro = "";
     try {
-      const [u, f, l] = await Promise.all([SB.rpc("admin_usuarios"), SB.rpc("admin_familias"), SB.from("admin_log").select("*").order("id", { ascending: false }).limit(300)]);
+      const [u, f, l, em] = await Promise.all([SB.rpc("admin_usuarios"), SB.rpc("admin_familias"), SB.from("admin_log").select("*").order("id", { ascending: false }).limit(300), SB.rpc("admin_email_status")]);
       if (u.error || f.error || l.error) throw (u.error || f.error || l.error);
-      ADM.users = u.data || []; ADM.fams = f.data || []; ADM.log = l.data || [];
+      ADM.users = u.data || []; ADM.fams = f.data || []; ADM.log = l.data || []; ADM.email = em.error ? null : em.data;
+      ADM.resumo = { novos: ADM.users.filter(x => x.efetivo === "pendente" && !x.visto_admin).length, pendentes: ADM.users.filter(x => x.efetivo === "pendente").length };
       if (ADM.filtro === null) ADM.filtro = ADM.users.some(x => x.efetivo === "pendente") ? "pendente" : "todos";
     } catch (e) { console.error(e); ADM.erro = e.message || String(e); }
     ADM.carregando = false; if (ui.view === "admin") render();
@@ -39,7 +52,8 @@
   const diasPara = d => d ? diasAte(TODAY, d) : null;
   const vencendo = u => u.efetivo === "ativo" && u.valido_ate && diasPara(u.valido_ate) <= 7;
   const FILTROS = [["pendente", "Aguardando liberação", u => u.efetivo === "pendente"], ["ativo", "Ativos", u => u.efetivo === "ativo"], ["vencendo", "Vencem em 7 dias", vencendo], ["vencido", "Vencidos", u => u.efetivo === "vencido"], ["bloqueado", "Bloqueados", u => u.efetivo === "bloqueado"], ["todos", "Todos", () => true]];
-  const quando = ts => ts ? br(String(ts).slice(0, 10)) + " " + String(new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })) : "—";
+  const FMT_DH = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const quando = ts => ts ? FMT_DH.format(new Date(ts)).replace(",", "") : "—";
   const validade = u => {
     if (u.superadmin) return `<span class="sub">sem prazo</span>`;
     if (!u.valido_ate) return u.efetivo === "pendente" ? "—" : `<span class="sub">sem prazo</span>`;
@@ -52,10 +66,11 @@
     if (!ehSuper()) return `${topbar("Administração")}<section class="panel empty"><b>Acesso restrito</b><span>Esta área é só dos administradores gerais do sistema.</span></section>`;
     if (!ADM.users && !ADM.carregando && !ADM.erro) setTimeout(carregar, 0);
     const top = `${topbar("Administração geral", "Controle interno de todas as contas · visível só para João Lucas e Emanoella")}
-    <div class="bar-row"><div class="seg" role="tablist">${[["usuarios", "Usuários"], ["familias", "Famílias"], ["historico", "Histórico"]].map(([k, l]) => `<button role="tab" aria-pressed="${ADM.tab === k}" data-act="admtab" data-arg="${k}">${l}</button>`).join("")}</div>
+    <div class="bar-row"><div class="seg" role="tablist">${[["leads", "Leads"], ["usuarios", "Usuários"], ["familias", "Famílias"], ["historico", "Histórico"]].map(([k, l]) => `<button role="tab" aria-pressed="${ADM.tab === k}" data-act="admtab" data-arg="${k}">${l}${k === "leads" && novos() ? `<span class="cnt">${novos()}</span>` : ""}</button>`).join("")}</div>
     <button class="btn" data-act="admrecarregar">${ADM.carregando ? "Atualizando…" : "Atualizar"}</button></div>`;
     if (ADM.erro) return top + `<section class="panel"><div class="hint-box erro">Não foi possível carregar: ${esc(ADM.erro)}</div></section>`;
     if (!ADM.users) return top + `<section class="panel"><p class="sub">Carregando…</p></section>`;
+    if (ADM.tab === "leads") return top + vLeads();
     if (ADM.tab === "familias") return top + vFamilias();
     if (ADM.tab === "historico") return top + vHistorico();
     return top + vUsuarios();
@@ -70,10 +85,10 @@
     <div class="adm-bar"><div class="seg" role="tablist">${FILTROS.map(([k, l]) => `<button role="tab" aria-pressed="${ADM.filtro === k}" data-act="admfiltro" data-arg="${k}">${l.replace("Aguardando liberação", "Aguardando")}</button>`).join("")}</div>
     <input type="search" id="adm-q" placeholder="Buscar nome, e-mail, CPF ou família" value="${esc(ADM.q)}" aria-label="Buscar usuário"></div>
     <section class="panel flush">${lista.length ? `<div class="tbl-wrap"><table class="rows"><thead><tr><th>Pessoa</th><th>CPF</th><th>Família</th><th>Status</th><th>Validade</th><th>Último acesso</th><th>Criada em</th><th></th></tr></thead><tbody>
-    ${lista.map(u => `<tr><td class="adm-user"><b>${esc(u.nome || u.nome_na_familia || "—")}${u.superadmin ? '<span class="tag-adm">admin geral</span>' : ""}</b><div class="sub">${esc(u.email)}${u.email_confirmado ? "" : " · e-mail não confirmado"}</div></td>
+    ${lista.map(u => `<tr><td class="adm-user"><b>${esc(u.nome || u.nome_na_familia || "—")}${u.superadmin ? '<span class="tag-adm">admin geral</span>' : ""}${u.efetivo === "pendente" && !u.visto_admin ? '<span class="tag-novo">NOVO</span>' : ""}</b><div class="sub">${esc(u.email)}${u.email_confirmado ? "" : " · e-mail não confirmado"}</div></td>
       <td class="num">${u.cpf ? cpfFmt(u.cpf) : '<span class="sub">não informado</span>'}</td>
       <td>${u.familia ? `${esc(u.familia)}<div class="sub">${u.papel === "admin" ? "administrador" : "membro"}</div>` : '<span class="sub">sem família</span>'}</td>
-      <td>${pillU(u.efetivo)}</td><td class="num">${validade(u)}</td><td class="num sub">${quando(u.ultimo_acesso)}</td><td class="num sub">${br(String(u.criado_em).slice(0, 10))}</td>
+      <td>${pillU(u.efetivo)}</td><td class="num">${validade(u)}</td><td class="num sub">${quando(u.ultimo_acesso)}</td><td class="num sub">${quando(u.criado_em).slice(0, 10)}</td>
       <td><div class="adm-acts">${acoes(u)}</div></td></tr>`).join("")}
     </tbody></table></div>` : `<div class="empty"><b>Ninguém aqui</b><span>${ADM.q ? "Nenhum usuário encontrado para essa busca." : "Nenhum usuário neste filtro."}</span></div>`}</section>
     <p class="note">Conta nova fica aguardando até vocês liberarem. Acesso vencido só consulta e exporta. Bloqueado não vê nada. Administradores gerais não podem ser bloqueados nem ter prazo.</p>`;
@@ -92,13 +107,36 @@
     return out.join("");
   }
 
+  const liga = on => `<span class="pill ${on ? "p-good" : "p-warn"}">${on ? "Ligado" : "Desligado"}</span>`;
+  const novos = () => (ADM.resumo && ADM.resumo.novos) || 0;
+  const haQuanto = ts => { const m = Math.max(0, Math.round((Date.now() - new Date(ts)) / 60000)); return m < 1 ? "agora" : m < 60 ? `há ${m} min` : m < 1440 ? `há ${Math.round(m / 60)} h` : `há ${Math.round(m / 1440)} ${Math.round(m / 1440) === 1 ? "dia" : "dias"}`; };
+  function vLeads() {
+    const L = ADM.users.filter(u => u.efetivo === "pendente").sort((a, b) => (a.visto_admin === b.visto_admin ? 0 : a.visto_admin ? 1 : -1) || (a.criado_em < b.criado_em ? 1 : -1));
+    const n = L.filter(u => !u.visto_admin).length;
+    const perm = "Notification" in window ? Notification.permission : "indisponivel";
+    const em = ADM.email;
+    return `${n ? `<div class="alerta-leads"><span><b>${n} ${n === 1 ? "cadastro novo" : "cadastros novos"}</b> aguardando a decisão de vocês.</span><button class="mini" data-act="admvistotodos">Marcar todos como vistos</button></div>` : ""}
+    <section class="panel flush">${L.length ? `<div class="lead-list" style="padding:14px">${L.map(u => `<article class="lead ${u.visto_admin ? "" : "novo"}">
+      <div><h3>${esc(u.nome || "—")}${u.visto_admin ? "" : '<span class="tag-novo">NOVO</span>'}</h3>
+        <div class="sub">${esc(u.email)}${u.email_confirmado ? "" : " · <b>e-mail ainda não confirmado</b>"}</div>
+        <div class="sub">CPF ${u.cpf ? cpfFmt(u.cpf) : "não informado"} · cadastrou ${haQuanto(u.criado_em)} (${quando(u.criado_em)})</div></div>
+      <div class="lead-acts"><button class="mini primary" data-act="admprazo" data-arg="${u.user_id}">Liberar</button><button class="mini" data-act="admbloquear" data-arg="${u.user_id}">Bloquear</button>${u.visto_admin ? "" : `<button class="mini" data-act="admvisto" data-arg="${u.user_id}">Marcar como visto</button>`}<button class="mini" data-act="admdetalhe" data-arg="${u.user_id}">Detalhes</button></div>
+    </article>`).join("")}</div>` : `<div class="empty"><b>Nenhum cadastro aguardando</b><span>Quando alguém criar conta, aparece aqui na hora, com aviso no menu e e-mail para vocês dois.</span></div>`}</section>
+    <section class="panel"><h2 style="margin:0 0 10px">Como vocês são avisados</h2><div class="avisos-cfg">
+      <div>${liga(em && em.configurado)} <b>E-mail</b> · ${em && em.configurado ? "ligado: cada cadastro novo manda um e-mail para os dois administradores." : "ainda não ligado: falta guardar a chave do Brevo no cofre (Vault) do Supabase."} <button class="mini" data-act="admemailteste">Enviar e-mail de teste</button></div>
+      ${em && em.envios && em.envios.length ? `<div class="sub">Últimos envios: ${em.envios.slice(0, 3).map(e => `${quando(e.ts)} · ${esc(e.assunto)} · ${e.erro ? '<span class="neg">' + esc(e.erro) + "</span>" : e.status_code ? (e.status_code < 300 ? '<span class="pos">entregue ao Brevo</span>' : '<span class="neg">recusado (' + e.status_code + ")</span>") : "enviando…"}`).join("<br>")}</div>` : ""}
+      <div>${liga(true)} <b>No app</b> · número no menu Administração e alerta na tela assim que a conta é criada.</div>
+      <div>${liga(perm === "granted")} <b>Notificação do navegador</b> · ${perm === "granted" ? "ligada neste aparelho: avisa mesmo com o app em outra aba." : perm === "denied" ? "bloqueada neste navegador. Libere nas configurações do site." : perm === "indisponivel" ? "este navegador não oferece." : `desligada neste aparelho. <button class="mini" data-act="admnotif">Ativar</button>`}</div>
+    </div></section>`;
+  }
+
   function vFamilias() {
     const F = ADM.fams;
     return `<section class="panel flush">${F.length ? `<div class="tbl-wrap"><table class="rows"><thead><tr><th>Família</th><th>Membros</th><th class="r">Lançamentos</th><th class="r">Contas</th><th class="r">Cartões</th><th class="r">Recorrências</th><th>Criada em</th><th>Última atividade</th><th></th></tr></thead><tbody>
     ${F.map(f => `<tr><td><b>${esc(f.nome)}</b><div class="sub">controle desde ${br(f.inicio)}</div></td>
       <td class="adm-membros">${(f.membros || []).map(m => `${esc(m.nome)} <span class="sub">(${m.papel === "admin" ? "admin" : "membro"})</span>`).join("<br>") || "—"}${f.convites ? `<div class="sub">${f.convites} convite(s) pendente(s)</div>` : ""}</td>
       <td class="r num">${f.lancamentos}</td><td class="r num">${f.contas}</td><td class="r num">${f.cartoes}</td><td class="r num">${f.recorrencias}</td>
-      <td class="num sub">${br(String(f.criado_em).slice(0, 10))}</td><td class="num sub">${quando(f.ultima_atividade)}</td>
+      <td class="num sub">${quando(f.criado_em).slice(0, 10)}</td><td class="num sub">${quando(f.ultima_atividade)}</td>
       <td class="r"><button class="mini primary" data-act="admver" data-arg="${f.id}">Ver finanças</button></td></tr>`).join("")}
     </tbody></table></div>` : `<div class="empty"><b>Nenhuma família criada</b></div>`}</section>
     <p class="note">"Ver finanças" abre a família inteira (painel, lançamentos, cartões, contas, conversa) em modo somente leitura. Cada abertura fica registrada no histórico.</p>`;
@@ -119,9 +157,37 @@
     if (ehSuper() && i < 0) VIEWS.push(["admin", "Administração"]);
     if (!ehSuper() && i >= 0) VIEWS.splice(i, 1);
     if (!ehSuper() && ui.view === "admin") ui.view = "painel";
-    if (ui.screen !== "app") { ADM.users = ADM.fams = ADM.log = null; ADM.filtro = null; }
+    if (ui.screen !== "app") { ADM.users = ADM.fams = ADM.log = null; ADM.filtro = null; ADM.resumo = null; ADM.conhecidos = null; pararAvisos(); }
     renderOriginal();
+    if (ui.screen === "app" && ehSuper()) { iniciarAvisos(); badge(); }
   };
+  function badge() {
+    document.querySelectorAll('.nav [data-go="admin"] .badge, .more-btn .adm-dot').forEach(b => b.remove());
+    const n = novos(); if (!n) return;
+    const bt = document.querySelector('.nav [data-go="admin"]'); if (bt) bt.insertAdjacentHTML("beforeend", `<span class="badge" aria-label="${n} cadastros novos">${n > 99 ? "99+" : n}</span>`);
+    const mais = document.querySelector(".more-btn"); if (mais && window.matchMedia("(max-width:760px)").matches) mais.insertAdjacentHTML("beforeend", '<span class="adm-dot" aria-hidden="true"></span>');
+    if (!/^\(\d+\) /.test(document.title)) document.title = `(${n} novo${n > 1 ? "s" : ""}) Caixa da Família`;
+  }
+  function avisar(lead) {
+    const nome = lead.nome || lead.email || "alguém";
+    toast(`Novo cadastro: ${nome}. Veja em Administração › Leads.`);
+    try { if ("Notification" in window && Notification.permission === "granted" && document.visibilityState !== "visible") { const n = new Notification("Novo cadastro no Caixa da Família", { body: `${nome} (${lead.email || ""}) está aguardando liberação.`, icon: "icons/icon-192.png", tag: "lead-" + lead.user_id }); n.onclick = () => { window.focus(); ADM.tab = "leads"; go("admin"); n.close(); }; } } catch (e) {}
+  }
+  async function consultarResumo() {
+    const { data, error } = await SB.rpc("admin_leads_resumo"); if (error || !data) return;
+    const antes = ADM.conhecidos; ADM.conhecidos = new Set([...(antes || []), ...(data.ultimos || []).map(l => l.user_id)]);
+    if (antes) for (const l of (data.ultimos || [])) if (!antes.has(l.user_id)) { avisar(l); ADM.users = null; }
+    const mudou = !ADM.resumo || ADM.resumo.novos !== data.novos; ADM.resumo = data;
+    if (mudou || ADM.users === null) { if (ui.view === "admin") { if (ADM.users === null) carregar(); else render(); } else badge(); }
+  }
+  function iniciarAvisos() {
+    if (ADM.timer) return;
+    consultarResumo(); ADM.timer = setInterval(consultarResumo, 60000);
+    try {
+      ADM.canal = SB.channel("leads-admin").on("postgres_changes", { event: "INSERT", schema: "public", table: "perfis" }, () => consultarResumo()).subscribe(() => {});
+    } catch (e) {}
+  }
+  function pararAvisos() { clearInterval(ADM.timer); ADM.timer = null; if (ADM.canal) { try { SB.removeChannel(ADM.canal); } catch (e) {} ADM.canal = null; } }
   ["admacesso", "admcpf"].forEach(n => FORMS_LEITURA.add(n));
 
   const user = id => ADM.users.find(u => u.user_id === id);
@@ -144,6 +210,10 @@
 
   Object.assign(acts, {
     admtab: t => { ADM.tab = t; render(); },
+    admvisto: acao(async id => { const { error } = await SB.rpc("admin_marcar_vistos", { p_user: id }); if (error) throw error; await carregar(); }),
+    admvistotodos: acao(async () => { const { error } = await SB.rpc("admin_marcar_vistos", { p_user: null }); if (error) throw error; await carregar(); toast("Todos marcados como vistos. Eles continuam aguardando liberação."); }),
+    admemailteste: acao(async () => { const { data, error } = await SB.rpc("admin_email_teste"); if (error) throw error; toast(data === "enviado" ? "E-mail de teste enviado para os dois administradores. Confira a caixa de entrada (e o spam)." : data === "não configurado" ? "O e-mail ainda não está ligado: falta guardar a chave do Brevo no Supabase." : "Não foi possível enviar: " + data); setTimeout(carregar, 4000); }),
+    admnotif: acao(async () => { const r = await Notification.requestPermission(); toast(r === "granted" ? "Pronto: este aparelho vai avisar quando alguém criar conta." : "Notificação não autorizada neste navegador."); render(); }),
     admfiltro: f => { ADM.filtro = f; render(); },
     admrecarregar: () => { carregar(); render(); },
     admprazo: id => {
