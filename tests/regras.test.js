@@ -228,15 +228,39 @@ test("print de fatura (texto reconhecido): datas por dia, parcela na linha de ba
   const t = "Nubank\nFatura atual\nR$ 1.332,22\nLimite disponível R$ 3.200,00\n20 OUT\nMercado Livre R$ 120,00\nParcela 2/10\niFood R$ 45,90\n19 OUT\nUber *Trip R$ 23,40\nPagamento recebido —R$ 800,00\n18 OUT\nNetflix.com R$ 55,90";
   const r = C.lerTextoImagem(t, "2026-10-21");
   assert.equal(r.banco, "Nubank"); assert.equal(r.cartao, true);
-  igual(r.itens.map(i => [i.d, i.desc, i.vs]), [["2026-10-20", "Mercado Livre Parcela 2/10", 12000], ["2026-10-20", "iFood", 4590], ["2026-10-19", "Uber *Trip", 2340], ["2026-10-19", "Pagamento recebido", -80000], ["2026-10-18", "Netflix.com", 5590]]);
+  igual(r.itens.map(i => [i.d, i.desc, i.vs, i.parc]), [["2026-10-20", "Mercado Livre", 12000, { k: 2, n: 10 }], ["2026-10-20", "iFood", 4590, null], ["2026-10-19", "Uber *Trip", 2340, null], ["2026-10-19", "Pagamento recebido", -80000, null], ["2026-10-18", "Netflix.com", 5590, null]]);
 });
 test("print de extrato: data na linha, sinal de saída, saldo ignorado, parcela 03/12 não vira valor", () => {
   const r = C.lerTextoImagem("itaú extrato\n14/10/2026 PIX ENVIADO MARIA -150,00\n16/10/2026 SALARIO EMPRESA 5.200,00\nSALDO DO DIA 4.616,78\n17/10 MAGAZINE LUIZA 03/12 199,90", "2026-10-21");
   assert.equal(r.banco, "Itaú");
-  igual(r.itens.map(i => [i.d, i.desc, i.vs]), [["2026-10-14", "PIX ENVIADO MARIA", -15000], ["2026-10-16", "SALARIO EMPRESA", 520000], ["2026-10-17", "MAGAZINE LUIZA 03/12", 19990]]);
+  igual(r.itens.map(i => [i.d, i.desc, i.vs, i.parc]), [["2026-10-14", "PIX ENVIADO MARIA", -15000, null], ["2026-10-16", "SALARIO EMPRESA", 520000, null], ["2026-10-17", "MAGAZINE LUIZA", 19990, { k: 3, n: 12 }]]);
 });
 test("print sem banco e datas de dezembro lidas em janeiro ficam no ano anterior", () => {
   const r = C.lerTextoImagem("28/12 Farmácia 89,90\nHoje\nPadaria 12,00", "2027-01-05");
   assert.equal(r.banco, null);
   igual(r.itens.map(i => [i.d, i.desc, i.vs]), [["2026-12-28", "Farmácia", 8990], ["2027-01-05", "Padaria", 1200]]);
+});
+
+test("print em tabela (data da compra, estabelecimento, parcela, valor, vencimento): parcela em campo próprio, vencimento define a fatura, linha sem data fica em branco", () => {
+  const t = "Data da compra Estabelecimento Parcela Valor Vencimento\n06/04/2026 PICPAY*EMANOELLA LOP 07/08 R$ 128,52 05/11/2026\n22/04/2026 ANUIDADE DIFERENCIADA 07/12 R$ 25,00 05/11/2026\n14/05/2026 PICPAY*EMANOELLA LOP — 06/06 R$ 51,35 05/11/2026\nAyumi 01/02 R$ 150,10 05/11/2026";
+  const r = C.lerTextoImagem(t, "2026-10-21");
+  assert.equal(r.banco, null, "PICPAY* é loja, não banco do cartão");
+  igual(r.itens.map(i => [i.d, i.desc, i.vs, i.parc, i.fat]), [
+    ["2026-04-06", "PICPAY*EMANOELLA LOP", 12852, { k: 7, n: 8 }, "2026-11"],
+    ["2026-04-22", "ANUIDADE DIFERENCIADA", 2500, { k: 7, n: 12 }, "2026-11"],
+    ["2026-05-14", "PICPAY*EMANOELLA LOP", 5135, { k: 6, n: 6 }, "2026-11"],
+    ["", "Ayumi", 15010, { k: 1, n: 2 }, "2026-11"]]);
+  // na análise para um cartão, cada parcela vira parcelamento com a 1ª parcela no mês certo
+  const S = C.vazio("João", "2026-10-01");
+  S.cartoes.push({ id: "k1", nome: "Casas Bahia", inst: "Casas Bahia", resp: "Gil", limite: 300000, fecha: 31, vence: 5, pagaCom: "c1", final: "9999" });
+  const a = C.analisar(S, r.itens, "k1", "2026-11");
+  igual(a.map(x => [x.st, x.n, x.k0]), [["parc", 8, "2026-05"], ["parc", 12, "2026-05"], ["parc", 6, "2026-06"], ["parc", 2, "2026-11"]]);
+});
+test("compra de cartão com fatura informada cai nessa fatura, não na da data", () => {
+  const S = C.vazio("João", "2026-10-01");
+  const card = { id: "k1", nome: "X", inst: "X", resp: "J", limite: 100000, fecha: 31, vence: 5, pagaCom: "c1", final: "1" };
+  S.cartoes.push(card);
+  S.lanc.push({ id: "l1", data: "2026-04-06", desc: "Compra antiga", tipo: "despesa", valor: 1000, cartao: "k1", fatura: "2026-11", origem: "importação" });
+  assert.equal(C.fatura(S, card, "2026-11").total, 1000);
+  assert.equal(C.fatura(S, card, "2026-05").total, 0);
 });
