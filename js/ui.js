@@ -335,11 +335,28 @@ function realizado(ym) {
     guardado: sum(L.filter(l => l.tipo === "transferencia" && isInv(l.destino)), l => l.valor) - sum(L.filter(l => l.tipo === "transferencia" && isInv(l.conta) && !isInv(l.destino)), l => l.valor),
   };
 }
+// de onde sai o valor inicial da previsão, parte por parte, com avisos quando faltam dados
+function pontoPartida(p) {
+  const b = saldoLivre(S, mk(CUR, 31)), mes = MESL[+CUR.slice(5) - 1];
+  const contas = S.contas.filter(c => c.caixa);
+  const semSaldo = contas.length && contas.every(c => saldoConta(S, c) === 0);
+  const lista = (itens, f) => itens.length ? `<div class="pp-det">${itens.map(f).join("")}</div>` : "";
+  const linha = (rotulo, valor, det, cls = "") => `<div class="pp-l ${cls}"><div><span>${rotulo}</span>${det}</div><b class="num">${valor}</b></div>`;
+  return `<section class="panel pp">${head("De onde vem o ponto de partida", `<span class="hint">${fmt(p.inicio)}</span>`)}
+    ${linha("Dinheiro nas contas hoje", fmt(b.caixa), lista(contas, c => `<span>${esc(c.nome)}: ${fmt(saldoConta(S, c))}</span>`))}
+    ${linha(`Contas de ${mes} ainda a pagar`, fmt(-b.comprometido), lista(b.comps, c => `<span>${brs(c.venc)} · ${esc(c.desc)}: ${fmt(c.restante)}</span>`), "neg")}
+    ${b.prov ? linha("Reservas planejadas", fmt(-b.prov), lista(b.provs, x => `<span>${esc(x.nome)}: ${fmt(x.reservado)}</span>`), "neg") : ""}
+    ${linha(`Receitas de ${mes} que ainda vão entrar`, fmt(b.aReceber), lista(b.receitas.filter(r => r.restante > 0), r => `<span>${brs(r.venc)} · ${esc(r.desc)}: ${fmt(r.restante)}</span>`), "pos")}
+    ${linha("= Ponto de partida da previsão", fmt(p.inicio), "", "tot")}
+    ${semSaldo ? `<div class="check bad"><b>As contas estão com saldo R$ 0,00.</b> A previsão está considerando que não há dinheiro nenhum nelas hoje. Informe o saldo real de cada conta (em ${br(S.inicio)}, início do controle) em Configurações → Contas → Editar → Saldo inicial. <button class="mini" data-go="ajustes" data-aj="contas">Abrir contas</button></div>` : ""}
+    ${!ui.varMes ? `<div class="check bad"><b>Gastos do dia a dia estão em R$ 0,00.</b> Sem uma estimativa no campo "Gastos variáveis estimados por mês" (acima, à direita), a previsão sobe todo mês como se vocês só pagassem as contas fixas e as faturas já lançadas.</div>` : ""}
+  </section>`;
+}
 function vPlan() {
   const p = projecao(S, ui.varMes), m = ui.plan;
   let body = "";
-  if (m === "previsto") body = `
-    <section class="panel chart">${head("Saldo livre ao fim de cada mês", `<span class="hint">Começa em ${fmt(p.inicio)}: saldo livre de hoje + receitas que ainda entram em ${MESL[+CUR.slice(5) - 1]}</span>`)}${barChart(p.meses.map(x => ({ k: x.ym, l: ymLabel(x.ym).slice(0, 3), v: x.fim })), { onClick: "projmes" })}</section>
+  if (m === "previsto") body = `${pontoPartida(p)}
+    <section class="panel chart">${head("Saldo livre ao fim de cada mês", `<span class="hint">Começa em ${fmt(p.inicio)} (veja a composição acima)</span>`)}${barChart(p.meses.map(x => ({ k: x.ym, l: ymLabel(x.ym).slice(0, 3), v: x.fim })), { onClick: "projmes" })}</section>
     <section class="panel flush"><div class="tbl-wrap"><table class="rows"><thead><tr><th>Mês</th><th class="r">Receitas previstas</th><th class="r">Contas fixas e variáveis</th><th class="r">Dívidas</th><th class="r">Faturas conhecidas</th><th class="r">Gastos variáveis estim.</th><th class="r">Saldo livre ao fim</th></tr></thead><tbody>
     ${p.meses.map(x => `<tr data-act="projmes" data-arg="${x.ym}" tabindex="0"><td>${ymLong(x.ym)}</td><td class="r num pos">${fmt(x.rec)}</td><td class="r num">${fmt(-x.fixas)}</td><td class="r num">${fmt(-x.div)}</td><td class="r num">${fmt(-x.fat)}</td><td class="r num muted">${fmt(-x.variaveis)}</td><td class="r num"><b class="${x.fim < 0 ? "neg" : ""}">${fmt(x.fim)}</b></td></tr>`).join("")}
     </tbody></table></div></section>
