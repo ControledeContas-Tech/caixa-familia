@@ -204,7 +204,7 @@ function vLanc() {
   if (f.tipo) rows = rows.filter(r => f.tipo === "despesa" ? (r.tipo === "despesa" || r.tipo === "estorno") : r.tipo === f.tipo);
   if (f.q) { const q = norm(f.q); rows = rows.filter(r => norm(r.desc + " " + r.cat + " " + r.contaN).includes(q)); }
   const rec = sum(rows.filter(r => r.tipo === "receita"), r => r.valor), desp = -sum(rows.filter(r => r.tipo === "despesa" || r.tipo === "estorno"), r => r.signed), tr = rows.filter(r => r.tipo === "transferencia").length;
-  const meses = []; for (let m = ymOf(S.inicio); m <= addYM(CUR, 3); m = addYM(m, 1)) meses.push([m, ymLabel(m)]);
+  const meses = []; for (let m = primeiroMes(); m <= addYM(CUR, 3); m = addYM(m, 1)) meses.push([m, ymLabel(m)]);
   const contasOpt = [["", "Todas as contas e cartões"], ...S.contas.map(c => [c.id, c.nome]), ...S.cartoes.map(c => [c.id, c.nome])];
   return `${topbar("Lançamentos", f.q ? `Resultado da busca por “${esc(f.q)}” em todos os meses` : "Cartão pela fatura do mês · contas pela data")}
   <section class="filters">
@@ -227,9 +227,14 @@ function vLanc() {
 }
 
 // ---------- cartões ----------
+// mês mais antigo com algum lançamento (compras importadas de meses antes do início do controle)
+function primeiroMes() { let m = ymOf(S.inicio); for (const l of S.lanc) if (!l.excluido && l.data && ymOf(l.data) < m) m = ymOf(l.data); for (const p of S.parc) if (p.data && ymOf(p.data) < m) m = ymOf(p.data); return m; }
 // faturas com movimento + a atual e as 2 seguintes (mesmo vazias), para cartão sem compras não ficar sem tela
 function faturasTela(card, r = cardResumo(S, card)) {
-  const fs = [], de = ymOf(S.inicio) < r.atual.key ? ymOf(S.inicio) : r.atual.key;
+  let de = ymOf(S.inicio) < r.atual.key ? ymOf(S.inicio) : r.atual.key;
+  for (const l of S.lanc) if (l.cartao === card.id && !l.excluido && l.data) { const k = l.fatura || keyOf(card, l.data); if (k < de) de = k; }
+  for (const p of S.parc) if (p.cartao === card.id) { const k = p.k0 || keyOf(card, p.data); if (k < de) de = k; }
+  const fs = [];
   for (let k = de; k <= "2028-12"; k = addYM(k, 1)) { const fx = fatura(S, card, k); if (fx.itens.length || fx.pago || (k >= r.atual.key && k <= addYM(r.atual.key, 2))) fs.push(fx); }
   return fs;
 }
@@ -450,19 +455,21 @@ function vImport() {
       ${S.contas.length ? `<div class="vinc-t">Contas</div><div class="vinc-l">${S.contas.map(c => `<button class="vinc-c ${a.destino === c.id ? "on" : ""}" data-act="impvincular" data-arg="${fi}|${c.id}">${icon("contas")}<span><b>${esc(c.nome)}</b><span class="sub">${esc(c.inst || c.tipo || "")}</span></span></button>`).join("")}</div>` : ""}</div>` : ""}
     ${a.repetido ? `<div class="check bad pad-x">Este arquivo já foi importado em ${tsBr(a.repetido.data)} (lote ${esc(a.repetido.id)}). Os itens já registrados aparecem como duplicatas ou vinculados.</div>` : ""}
     ${a.erro ? `<div class="check bad pad-x">${esc(a.erro)}</div>` : a.lendo || !a.destino ? "" : `${a.aviso ? `<div class="check bad pad-x">${esc(a.aviso)}</div>` : ""}${a.img ? `<div class="check info pad-x">Confira cada linha com o print: data, descrição e valor podem ser corrigidos aqui mesmo. ${card ? "Compra é valor positivo; estorno ou pagamento, negativo (com −)." : "Saída é valor negativo (com −); entrada, positivo."}</div>` : ""}
-    <div class="${a.img && a.verPrint ? "imp-lado" : ""}">${a.img && a.verPrint ? `<a href="${a.preview}" target="_blank" rel="noopener" class="imp-thumb"><img src="${a.preview}" alt="Print enviado"></a>` : ""}<div class="tbl-wrap"><table class="rows imp"><thead><tr><th>Data</th><th>Descrição lida</th><th>Categoria</th><th class="r">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
+    <div class="${a.img && a.verPrint ? "imp-lado" : ""}">${a.img && a.verPrint ? `<a href="${a.preview}" target="_blank" rel="noopener" class="imp-thumb"><img src="${a.preview}" alt="Print enviado"></a>` : ""}<div class="tbl-wrap"><table class="rows imp"><thead><tr><th>${a.img ? "Data da compra" : "Data"}</th><th>Descrição lida</th>${a.img ? "<th>Parcela</th>" : ""}<th>Categoria</th><th class="r">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
     ${a.itens.map((it, i) => { const [pc, pl] = IMP_ST[it.st] || ["p-mute", it.st]; const ed = IMP_GRAVA.includes(it.st) || IMP_PEND.includes(it.st); const k = fi + ":" + i;
       const cats = it.tipo === "receita" ? catsRec() : catsDesp();
       const r = a.raw[i] || {};
       return `<tr class="${it.st === "parc" ? "flag" : it.st === "dup" ? "dup" : it.st === "skip" ? "skip" : ""}">
-      ${a.img ? `<td><input type="date" class="imp-ed" data-impimg="${k}:d" value="${esc(r.d || "")}" aria-label="Data"></td><td><input class="imp-ed wide" data-impimg="${k}:desc" value="${esc(r.desc || "")}" placeholder="Descrição" aria-label="Descrição">${it.note ? `<div class="sub">${esc(it.note)}</div>` : ""}</td>`
+      ${a.img ? `<td><input type="date" class="imp-ed ${r.d ? "" : "falta"}" data-impimg="${k}:d" value="${esc(r.d || "")}" aria-label="Data da compra">${r.d ? "" : '<div class="sub neg">Preencha a data</div>'}</td><td><input class="imp-ed wide ${r.desc ? "" : "falta"}" data-impimg="${k}:desc" value="${esc(r.desc || "")}" placeholder="Descrição" aria-label="Descrição">${it.note ? `<div class="sub">${esc(it.note)}</div>` : ""}</td>
+      <td><input class="imp-ed parc" data-impimg="${k}:parc" value="${r.parc ? pad(r.parc.k) + "/" + pad(r.parc.n) : ""}" placeholder="à vista" inputmode="numeric" aria-label="Parcela (ex.: 07/08)">${r.fat ? `<div class="sub">fatura ${ymLabel(r.fat)}</div>` : ""}</td>`
         : `<td class="num">${brs(it.d)}</td><td><b>${esc(it.desc)}</b>${it.note ? `<div class="sub">${esc(it.note)}</div>` : ""}</td>`}
       <td>${ed && it.tipo !== "transferencia" ? `<select data-imp-cat="${k}" aria-label="Categoria">${opts(cats, it.cat)}</select>` : `<span class="sub">${esc(it.cat || "—")}</span>`}</td>
-      <td class="r num ${it.tipo === "receita" || it.tipo === "estorno" ? "pos" : ""}">${a.img ? `<input class="imp-ed num r" inputmode="decimal" data-impimg="${k}:vs" value="${r.vs ? (r.vs < 0 ? "-" : "") + (Math.abs(r.vs) / 100).toFixed(2).replace(".", ",") : ""}" placeholder="0,00" aria-label="Valor">${it.st === "parc" || it.st === "parcok" ? `<div class="sub">${it.n} parcelas</div>` : ""}` : it.st === "parc" || it.st === "parcok" ? `${it.n} × ${fmt(it.v)}` : (it.tipo === "receita" || it.tipo === "estorno" ? "+ " : "") + fmt(it.v)}</td>
+      <td class="r num ${it.tipo === "receita" || it.tipo === "estorno" ? "pos" : ""}">${a.img ? `<input class="imp-ed num r ${r.vs ? "" : "falta"}" inputmode="decimal" data-impimg="${k}:vs" value="${r.vs ? (r.vs < 0 ? "-" : "") + (Math.abs(r.vs) / 100).toFixed(2).replace(".", ",") : ""}" placeholder="0,00" aria-label="Valor">${it.st === "parc" || it.st === "parcok" ? `<div class="sub">${it.n} × ${fmt(it.v)}</div>` : ""}` : it.st === "parc" || it.st === "parcok" ? `${it.n} × ${fmt(it.v)}` : (it.tipo === "receita" || it.tipo === "estorno" ? "+ " : "") + fmt(it.v)}</td>
       <td><span class="pill ${pc}">${pl}</span></td>
       <td class="r"><span class="actions">${it.st === "dup" ? `<button class="mini" data-imp="${k}" data-to="skip">É o mesmo · ignorar</button><button class="mini" data-imp="${k}" data-to="keep">São diferentes</button>`
         : it.st === "parc" ? `<button class="mini" data-imp="${k}" data-to="parcok">Confirmar ${it.n}×</button><button class="mini" data-imp="${k}" data-to="avista">É à vista</button>`
         : it.st === "comp" ? `<button class="mini ghost" data-imp="${k}" data-to="ok">Não é essa conta</button><button class="mini ghost" data-imp="${k}" data-to="skip">Não importar</button>`
+        : it.st === "parcok" && a.img ? `<button class="mini ghost" data-imp="${k}" data-to="avista">É à vista</button><button class="mini ghost" data-imp="${k}" data-to="skip">Não importar</button>`
         : IMP_GRAVA.includes(it.st) ? `<button class="mini ghost" data-imp="${k}" data-to="skip">Não importar</button>`
         : it.st === "skip" && !["link", "info"].includes(it.orig) ? `<button class="mini ghost" data-imp="${k}" data-to="${it.orig || "ok"}">Desfazer</button>` : ""}${a.img ? `<button class="mini ghost" data-act="impremover" data-arg="${k}" aria-label="Remover linha">✕</button>` : ""}</span></td></tr>`; }).join("")}
     </tbody></table></div></div>${a.img ? `<div class="pad-x"><button class="mini" data-act="impadd" data-arg="${fi}">+ Adicionar linha que faltou</button></div>` : ""}`}</section>`; }).join("") : ""}
@@ -470,8 +477,8 @@ function vImport() {
     <div class="footer-bar"><span class="sub">Duplicatas nunca são apagadas sozinhas: você decide cada uma.</span><span class="actions"><button class="btn" data-act="descartar">Descartar</button><button class="btn primary" data-act="gravarimp" ${pendentes || !gravaveis ? "disabled" : ""}>Gravar ${gravaveis} lançamento${gravaveis === 1 ? "" : "s"}</button></span></div>`
   : !semDestino ? `<section class="panel"><h2>Onde conseguir os arquivos</h2><ul class="tips"><li><b>Nubank:</b> no app, abra a fatura e toque em “Exportar fatura” (CSV); para a conta, “Pedir extrato” em OFX ou CSV.</li><li><b>Itaú, Bradesco, Santander, Banco do Brasil, Caixa:</b> no internet banking, extrato → salvar como OFX (Money) ou CSV.</li><li><b>Inter:</b> extrato → exportar em OFX ou CSV.</li><li><b>Só tem o print?</b> Tire um print da fatura ou do extrato (de preferência com as datas visíveis) e cole aqui com Ctrl+V ou escolha a imagem. Confira os valores lidos antes de gravar.</li><li>PDF: a leitura chega na próxima etapa.</li></ul></section>` : ""}
   <section class="panel flush">${head("Histórico de importações").replace('class="panel-head"', 'class="panel-head pad"')}
-    ${S.importacoes.length ? `<div class="tbl-wrap"><table class="rows"><thead><tr><th>Lote</th><th>Data</th><th>Arquivos</th><th>Quem</th><th class="r">Incluídos</th><th class="r">Vinculados</th><th class="r">Ignorados</th></tr></thead><tbody>
-    ${S.importacoes.map(h => `<tr><td class="num">${esc(h.id)}</td><td class="num">${tsBr(h.data)}</td><td class="sub">${esc(h.arquivos)}</td><td>${esc(h.user)}</td><td class="r num">${h.incl}</td><td class="r num">${h.vinc}</td><td class="r num">${h.ign}</td></tr>`).join("")}
+    ${S.importacoes.length ? `<div class="tbl-wrap"><table class="rows"><thead><tr><th>Lote</th><th>Data</th><th>Arquivos</th><th>Quem</th><th class="r">Incluídos</th><th class="r">Vinculados</th><th class="r">Ignorados</th><th></th></tr></thead><tbody>
+    ${S.importacoes.map(h => `<tr><td class="num">${esc(h.id)}</td><td class="num">${tsBr(h.data)}</td><td class="sub">${esc(h.arquivos)}</td><td>${esc(h.user)}</td><td class="r num">${h.incl}</td><td class="r num">${h.vinc}</td><td class="r num">${h.ign}</td><td class="r"><button class="mini" data-act="desfazerimp" data-arg="${esc(h.id)}">Desfazer</button></td></tr>`).join("")}
     </tbody></table></div>` : `<p class="note pad-x pad-b">Nenhuma importação ainda.</p>`}</section>`;
 }
 
@@ -487,11 +494,12 @@ function adivinhaDestino(nome, lido) {
   return c ? c.id : null;
 }
 function adivinhaFatura(card, itens) {
-  const cont = {}; itens.filter(i => i.vs > 0 && !achaParcela(i.desc)).forEach(i => { const k = keyOf(card, i.d); cont[k] = (cont[k] || 0) + 1; });
+  const fs = itens.map(i => i.fat).filter(Boolean); if (fs.length) { const c = {}; fs.forEach(f => c[f] = (c[f] || 0) + 1); return Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]; }
+  const cont = {}; itens.filter(i => i.vs > 0 && i.d && !i.parc && !achaParcela(i.desc)).forEach(i => { const k = keyOf(card, i.d); cont[k] = (cont[k] || 0) + 1; });
   const best = Object.entries(cont).sort((a, b) => b[1] - a[1])[0];
   return best ? best[0] : keyOf(card, TODAY);
 }
-function reanalisa(a) { a.itens = analisar(S, a.raw, a.destino, a.fatura); }
+function reanalisa(a) { a.itens = analisar(S, a.raw, a.destino, a.fatura); if (a.img) a.itens.forEach((it, i) => { if (it.st === "parc" && a.raw[i] && a.raw[i].parc) it.st = "parcok"; }); }
 const ehImagem = f => /^image\//.test(f.type || "") || /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name || "");
 // reconhecimento de texto no próprio navegador (Tesseract, português). Baixado só quando o primeiro print chega.
 const OCR = Object.assign({ lib: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js", workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js", corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1", langPath: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/por@1.0.0/4.0.0_best_int" }, window.CAIXA_OCR || {});
@@ -560,14 +568,14 @@ async function lerArquivos(files) {
 }
 function gravarImportacao() {
   const P = S.pend; let incl = 0, vinc = 0, ign = 0;
-  const num = Math.max(0, ...S.importacoes.map(h => +String(h.id).replace(/\D/g, "") || 0)) + 1, id = "#" + String(num).padStart(4, "0");
+  const num = Math.max(0, ...S.importacoes.map(h => +String(h.id).replace(/\D/g, "") || 0), ...S.audit.filter(a => a.acao === "Desfez importação").map(a => +String(a.alvo).replace(/\D/g, "") || 0), ...S.lanc.map(l => +String(l.imp || "").replace(/\D/g, "") || 0)) + 1, id = "#" + String(num).padStart(4, "0");
   for (const a of P.arquivos) for (const it of a.itens) {
     if (it.st === "link") { vinc++; continue; }
     if (!IMP_GRAVA.includes(it.st)) { ign++; continue; }
     const card = cardOf(S, it.alvo), resp = card ? card.resp : (S.contas.find(c => c.id === it.alvo) || {}).resp || S.user;
     const base = { data: it.d, desc: it.desc, valor: it.v, cat: it.cat, sub: it.sub || "", origem: "importação", imp: id, resp, fitid: it.fitid || undefined };
-    if (it.st === "parcok") { S.parc.push({ id: uid("p"), cartao: it.alvo, desc: it.desc, cat: it.cat, sub: it.sub || "", data: it.d, total: it.v * it.n, n: it.n, resp, origem: "importação", k0: it.k0 }); incl++; continue; }
-    if (card) { lancar({ ...base, tipo: it.tipo === "estorno" ? "estorno" : "despesa", cartao: it.alvo, estornoDe: it.estornoDe || undefined }); incl++; continue; }
+    if (it.st === "parcok") { S.parc.push({ id: uid("p"), cartao: it.alvo, desc: it.desc, cat: it.cat, sub: it.sub || "", data: it.d, total: it.v * it.n, n: it.n, resp, origem: "importação", k0: it.k0, imp: id }); incl++; continue; }
+    if (card) { lancar({ ...base, tipo: it.tipo === "estorno" ? "estorno" : "despesa", cartao: it.alvo, estornoDe: it.estornoDe || undefined, fatura: it.fat || undefined }); incl++; continue; }
     if (it.tipo === "transferencia") { lancar({ ...base, tipo: "transferencia", conta: it.alvo, destino: it.cartaoDestino, fatura: it.fatura, cat: undefined }); incl++; continue; }
     const l = lancar({ ...base, tipo: it.tipo, conta: it.alvo });
     if (it.st === "comp") {
@@ -1089,6 +1097,19 @@ Object.assign(acts, {
     baixar("﻿" + linhasCsv.join("\r\n"), `lancamentos-${TODAY}.csv`, "text/csv"); toast("Planilha baixada. Parcelas de cartão aparecem como compras parceladas na exportação completa (JSON)."); },
   apagar: () => modal("Apagar todos os dados financeiros", `<form class="form" data-form="apagar"><div class="field full"><div class="check bad">Remove contas, cartões, lançamentos, parcelamentos, contas a pagar, dívidas, provisões e investimentos. Não pode ser desfeito. Exporte os dados antes.</div></div>${field("Digite APAGAR para confirmar", `<input id="ap-conf" name="conf" autocomplete="off">`, true, "ap-conf")}<div class="field full row-actions"><button class="btn danger">Apagar definitivamente</button><button type="button" class="btn" data-close>Cancelar</button></div></form>`),
   descartar: () => { (S.pend ? S.pend.arquivos : []).forEach(a => { if (a.preview) URL.revokeObjectURL(a.preview); }); S.pend = null; render(); toast("Importação descartada. Nada foi gravado."); },
+  desfazerimp: id => {
+    const ls = S.lanc.filter(l => l.imp === id && !l.excluido), ps = S.parc.filter(p => p.imp === id), h = S.importacoes.find(x => x.id === id);
+    modal("Desfazer a importação " + esc(id) + "?", `<p>Remove o que entrou por este lote${h ? ` (${esc(h.arquivos)})` : ""}: <b>${ls.length} lançamento${ls.length === 1 ? "" : "s"}</b>${ps.length ? ` e <b>${ps.length} parcelamento${ps.length === 1 ? "" : "s"}</b> (com todas as parcelas futuras)` : ""}, somando ${fmt(sum(ls, l => l.valor) + sum(ps, p => p.total))}. Pagamentos de contas a pagar ligados a eles voltam a ficar em aberto.</p><p class="sub">Depois você pode importar o mesmo arquivo de novo, já corrigido.</p><div class="row-actions"><button class="btn danger" data-act="desfazerimpok" data-arg="${esc(id)}">Desfazer importação</button><button class="btn" data-close>Cancelar</button></div>`);
+  },
+  desfazerimpok: id => {
+    const ids = new Set(S.lanc.filter(l => l.imp === id).map(l => l.id)), nl = ids.size, np = S.parc.filter(p => p.imp === id).length;
+    S.lanc = S.lanc.filter(l => !ids.has(l.id)); S.parc = S.parc.filter(p => p.imp !== id);
+    for (const k in S.inst) if (S.inst[k].pag) S.inst[k].pag = S.inst[k].pag.filter(pg => !ids.has(pg.lanc));
+    S.importacoes = S.importacoes.filter(x => x.id !== id);
+    audit("Desfez importação", id, `${nl} lançamentos e ${np} parcelamentos removidos`);
+    if (S.pend) S.pend.arquivos.forEach(a => { if (a.repetido && a.repetido.id === id) a.repetido = null; if (a.destino && !a.erro && !a.lendo) reanalisa(a); });
+    closeLayer(); commit(`Importação ${id} desfeita: ${nl} lançamento${nl === 1 ? "" : "s"}${np ? ` e ${np} parcelamento${np === 1 ? "" : "s"}` : ""} removido${nl + np === 1 ? "" : "s"}.`);
+  },
   impcartoes: fi => { const a = S.pend.arquivos[+fi]; a.escolher = !a.escolher || !a.destino; render(); },
   impvincular: arg => { const [fi, id] = arg.split("|"), a = S.pend.arquivos[+fi]; a.destino = id; a.escolher = false; const c = cardOf(S, id); a.fatura = c ? adivinhaFatura(c, a.raw) : null; reanalisa(a); render(); toast("Vinculado a " + nomeDe(id) + (c ? ", fatura de " + ymLong(a.fatura) + ". Confira a fatura acima." : ".")); },
   impverprint: fi => { const a = S.pend.arquivos[+fi]; a.verPrint = !a.verPrint; render(); },
@@ -1179,12 +1200,14 @@ document.addEventListener("change", e => {
   else if (t.id === "simorc") { const v = parseBRL(t.value); if (v > 0) { ui.simOrc = v; render(); } }
   else if (t.dataset.impimg !== undefined) {
     const [fi, i, campo] = t.dataset.impimg.split(":"), a = S.pend.arquivos[+fi], r = a.raw[+i]; if (!r) return;
-    if (campo === "d") r.d = t.value || r.d; else if (campo === "desc") r.desc = t.value.trim(); else { const v = parseValor(t.value); r.vs = isNaN(v) ? 0 : v; }
+    if (campo === "d") r.d = t.value || ""; else if (campo === "desc") r.desc = t.value.trim();
+    else if (campo === "parc") { const m = t.value.match(/(\d{1,2})\s*(?:\/|de)\s*(\d{1,2})/i); r.parc = m && +m[1] >= 1 && +m[2] >= 2 && +m[2] <= 48 && +m[1] <= +m[2] ? { k: +m[1], n: +m[2] } : null; if (t.value.trim() && !r.parc) toast("Parcela no formato 07/08 (parcela atual / total, até 48)."); }
+    else { const v = parseValor(t.value); r.vs = isNaN(v) ? 0 : v; }
     reanalisa(a); render();
   }
   else if (t.dataset.impCat !== undefined) { const [fi, i] = t.dataset.impCat.split(":").map(Number); S.pend.arquivos[fi].itens[i].cat = t.value; }
   else if (t.dataset.impfileDest !== undefined) { const a = S.pend.arquivos[+t.dataset.impfileDest]; a.destino = t.value; const c = cardOf(S, a.destino); a.fatura = c ? adivinhaFatura(c, a.raw) : null; reanalisa(a); render(); }
-  else if (t.dataset.impfileFat !== undefined) { const a = S.pend.arquivos[+t.dataset.impfileFat]; a.fatura = t.value; reanalisa(a); render(); }
+  else if (t.dataset.impfileFat !== undefined) { const a = S.pend.arquivos[+t.dataset.impfileFat]; a.fatura = t.value; if (a.img) a.raw.forEach(r => r.fat = t.value); reanalisa(a); render(); }
   else if (t.id === "arquivos" && t.files.length) { lerArquivos([...t.files]); t.value = ""; }
   else if (t.form && t.form.id === "fnovo") { if (t.name === "cat") t.dataset.touched = "1"; novoHint(); }
 });

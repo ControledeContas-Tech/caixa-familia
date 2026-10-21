@@ -251,7 +251,7 @@ const dueOf = (card, key) => mk(key, card.vence);
 const parcVal = (p, k) => { const base = Math.floor(p.total / p.n); return k === 1 ? p.total - base * (p.n - 1) : base; };
 function fatItens(S, card, key) {
   const out = [];
-  for (const l of S.lanc) if (l.cartao === card.id && !l.excluido && (l.tipo === "despesa" || l.tipo === "estorno") && keyOf(card, l.data) === key)
+  for (const l of S.lanc) if (l.cartao === card.id && !l.excluido && (l.tipo === "despesa" || l.tipo === "estorno") && (l.fatura || keyOf(card, l.data)) === key)
     out.push({ data: l.data, desc: l.desc, cat: l.cat, sub: l.sub, resp: l.resp, valor: l.tipo === "estorno" ? -l.valor : l.valor, ref: l.id, estorno: l.tipo === "estorno", estornoDe: l.estornoDe, origem: l.origem });
   for (const p of S.parc) if (p.cartao === card.id) {
     const k = ymDiff(p.k0 || keyOf(card, p.data), key) + 1;

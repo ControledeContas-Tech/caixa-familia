@@ -88,42 +88,65 @@ function dataDaLinha(L, hoje) {
   return null;
 }
 // valor no formato brasileiro (exige vírgula com 2 casas para não confundir com datas e parcelas)
-const VALOR_IMG = /([+\-−–—]\s*)?(?:R\s?\$\s*)?([+\-−–—]\s*)?(?<![\d\/])(\d{1,3}(?:\.\d{3})*,\d{2})(?!\d)/g;
+const VALOR_IMG = /([+\-−–—](?=R|\d))?(?:R\s?\$\s*)?([+\-−–—](?=\d))?(?<![\d\/])(\d{1,3}(?:\.\d{3})*,\d{2})(?!\d)/g;
+// data em qualquer lugar da linha (dd/mm/aaaa, dd/mm/aa ou dd/mm)
+const DATA_IMG = /(?<![\d\/])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d\/])/g;
+// parcela "07/08", "Parcela 2 de 10", "Parc 3/12" (sem ano: não é data)
+const PARC_IMG = /(?:\bPARCELA\s*|\bPARC\.?\s*)?(?<![\d\/])(\d{1,2})\s*(?:\/|\bDE\b)\s*(\d{1,2})(?![\d\/])/g;
+const isoDe = (d, m, y, hoje) => y ? `${y.length === 2 ? "20" + y : y}-${pad(+m)}-${pad(+d)}` : anoProvavel(+m, +d, hoje);
+const dataValida = (d, m) => +d >= 1 && +d <= 31 && +m >= 1 && +m <= 12;
+function limpaDesc(t) {
+  return String(t || "").replace(/\*\s+/g, "*").replace(/\bR\s?\$\s*/gi, " ").replace(/(?<![\d\/])\d{1,2}\/\d{1,2}\/(\d{4}|\d{2})(?![\d\/])/g, " ")
+    .replace(/[|]+/g, " ").replace(/\s+/g, " ").replace(/^[\s\-–—−•·:.,;]+|[\s\-–—−•·:.,;+]+$/g, "").replace(/\s+[\-–—−]\s*$/, "").trim();
+}
 function lerTextoImagem(texto, hoje = TODAY) {
-  const brutas = String(texto || "").split(/\r?\n/).map(l => l.replace(/[|_“”"'`~]+/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const brutas = String(texto || "").split(/\r?\n/).map(l => l.replace(/[_“”"'`~]+/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
   const N = norm(brutas.join(" \n "));
-  const banco = (BANCOS_IMG.find(([k]) => (" " + N + " ").includes(" " + k) || N.includes(k)) || [])[1] || null;
-  const cartao = /FATURA|CARTAO|LIMITE (DISPONIVEL|TOTAL)|FINAL \d{4}/.test(N);
+  const NB = N.replace(/\b[A-Z0-9]{2,}\s?\*\s?\S*/g, " "); // "PICPAY*LOJA", "MP *LOJA" são lojas, não o banco do cartão
+  const banco = (BANCOS_IMG.find(([k]) => (" " + NB + " ").includes(" " + k)) || [])[1] || null;
+  const cartao = /FATURA|CARTAO|LIMITE (DISPONIVEL|TOTAL)|FINAL \d{4}|VENCIMENTO|PARCELA/.test(N);
   const itens = []; let dataAtual = null, descPend = "", ignorados = 0, ultimaLinhaItem = false;
   for (const bruta of brutas) {
-    let L = norm(bruta);
-    const dt = dataDaLinha(L, hoje);
-    let linhaData = null;
-    if (dt) { linhaData = dt.iso; L = dt.resto.trim(); }
+    const L0 = norm(bruta), B = bruta.length === L0.length ? bruta : L0; // mesmo comprimento: dá para recortar o texto original
+    const dt = dataDaLinha(L0, hoje);
+    const ini = dt ? L0.length - dt.resto.length : 0;
+    const L = L0.slice(ini);
     const valores = [...L.matchAll(VALOR_IMG)];
     if (!valores.length) {
       // "Parcela 2/10" na linha de baixo do valor: pertence à compra anterior
-      if (!linhaData && itens.length && ultimaLinhaItem && /^(PARCELA|PARC\.?)\s*\d{1,2}\s*(\/|DE)\s*\d{1,2}$/.test(L) && !achaParcela(itens[itens.length - 1].desc)) { itens[itens.length - 1].desc += " " + bruta.trim(); ultimaLinhaItem = false; continue; }
+      const pm = L.trim().match(/^(?:PARCELA|PARC\.?)\s*(\d{1,2})\s*(?:\/|DE)\s*(\d{1,2})$/);
+      if (!dt && pm && itens.length && ultimaLinhaItem && !itens[itens.length - 1].parc && +pm[1] >= 1 && +pm[1] <= +pm[2] && +pm[2] >= 2) { itens[itens.length - 1].parc = { k: +pm[1], n: +pm[2] }; ultimaLinhaItem = false; continue; }
       ultimaLinhaItem = false;
-      if (linhaData && !L.replace(/[^A-Z]/g, "")) { dataAtual = linhaData; descPend = ""; continue; } // cabeçalho de dia ("20 OUT")
-      if (linhaData) dataAtual = linhaData;
-      if (RESUMO_IMG.test(L)) { descPend = ""; continue; }
-      if (/[A-Z]{3,}/.test(L)) descPend = (descPend && descPend.length < 40 && !linhaData ? descPend + " " : "") + bruta.slice(bruta.length - L.length).trim();
+      if (dt && !L.replace(/[^A-Z]/g, "")) { dataAtual = dt.iso; descPend = ""; continue; } // cabeçalho de dia ("20 OUT")
+      if (dt) dataAtual = dt.iso;
+      if (RESUMO_IMG.test(L) || /\b(DATA|ESTABELECIMENTO|DESCRICAO|HISTORICO|LANCAMENTO)\b.*\b(VALOR|PARCELA)\b/.test(L)) { descPend = ""; continue; } // resumo ou cabeçalho de tabela
+      if (/[A-Z]{3,}/.test(L)) descPend = (descPend && descPend.length < 40 && !dt ? descPend + " " : "") + limpaDesc(B.slice(ini));
       continue;
     }
-    if (RESUMO_IMG.test(L)) { descPend = ""; ignorados++; continue; }
+    if (RESUMO_IMG.test(L) && !/[A-Z]{3,}.*\d{1,2}\/\d{1,2}/.test(L.replace(RESUMO_IMG, ""))) { descPend = ""; ignorados++; continue; }
     const vm = valores[valores.length - 1];
-    let v = parseValor(vm[3]); if (!(v > 0)) { ignorados++; continue; }
-    const sinalAntes = (vm[1] || vm[2] || "") + L.slice(Math.max(0, vm.index - 2), vm.index);
-    const neg = /[\-−–—]/.test(sinalAntes) || /\b(ESTORNO|CREDITO|PAGAMENTO RECEBIDO|DEVOLUCAO)\b/.test(L);
-    // descrição: o que sobra na linha sem o valor; se não sobrar nada, a linha anterior
-    let desc = bruta.slice(bruta.length - (dt ? dt.resto.length : bruta.length)).replace(VALOR_IMG, " ").replace(/\bR\s?\$\s*/gi, " ").replace(/\s+/g, " ").replace(/^[\s\-–—−•·:]+|[\s\-–—−•·:+]+$/g, "").trim();
+    const v = parseValor(vm[3]); if (!(v > 0)) { ignorados++; continue; }
+    const antes = L.slice(0, vm.index), depois = L.slice(vm.index + vm[0].length);
+    const sinal = vm[1] || vm[2] || ""; // só vale sinal colado no valor ("−R$ 800,00", "-150,00"); "— R$" é borda de tabela
+    const neg = /[\-−–—]/.test(sinal) || /\b(ESTORNO|CREDITO|PAGAMENTO RECEBIDO|DEVOLUCAO)\b/.test(L);
+    // vencimento: data depois do valor (coluna "Vencimento") → fatura daquele mês
+    let venc = null;
+    for (const m of depois.matchAll(DATA_IMG)) if (dataValida(m[1], m[2])) { venc = isoDe(m[1], m[2], m[3], hoje); break; }
+    // compra: data no começo da linha; se não houver, uma data com ano antes da descrição
+    let d = dt ? dt.iso : null;
+    let antesB = B.slice(ini, ini + vm.index);
+    if (!d) { const m = [...antes.matchAll(DATA_IMG)].find(x => x[3] && dataValida(x[1], x[2])); if (m) d = isoDe(m[1], m[2], m[3], hoje); }
+    // parcela: último "k/n" sem ano antes do valor
+    let parc = null;
+    const pcs = [...antes.matchAll(PARC_IMG)].filter(m => +m[1] >= 1 && +m[2] >= 2 && +m[2] <= 48 && +m[1] <= +m[2]);
+    if (pcs.length) { const m = pcs[pcs.length - 1]; parc = { k: +m[1], n: +m[2] }; antesB = antesB.slice(0, m.index) + " " + antesB.slice(m.index + m[0].length); }
+    let desc = limpaDesc(antesB);
     if (!/[A-Za-zÀ-ú]{2,}/.test(desc)) desc = descPend;
-    else if (descPend && /^(PARCELA|PARC\.?)?\s*\d{1,2}\s*(\/|DE)\s*\d{1,2}$/i.test(norm(desc))) desc = descPend + " " + desc; // "Mercado Livre" + "Parcela 2/10"
     descPend = "";
-    const d = linhaData || dataAtual;
-    if (!d || !desc) { ignorados++; continue; }
-    itens.push({ d, desc: desc.slice(0, 120), vs: neg ? -v : v, fitid: null }); ultimaLinhaItem = true;
+    if (!d && !dt) d = dataAtual; // prints agrupados por dia ("20 OUT"); em tabela fica em branco para preencher
+    if (!desc && !d) { ignorados++; continue; } // linha de total sem descrição
+    itens.push({ d: d || "", desc: desc.slice(0, 120), vs: neg ? -v : v, fitid: null, parc, venc, fat: venc ? venc.slice(0, 7) : null });
+    ultimaLinhaItem = true;
   }
   return { itens, ignorados, banco, cartao, linhas: brutas.length };
 }
@@ -156,7 +179,7 @@ function analisar(S, itens, destino, faturaKey) {
   const ativos = conta ? compromissos(S, addYM(CUR, -2), addYM(CUR, 1)).filter(c => ativo(c) && c.kind !== "fat" && c.restante > 0) : [];
   const usados = new Set();
   return itens.map(it => {
-    const o = { d: it.d, desc: it.desc, v: Math.abs(it.vs), fitid: it.fitid, alvo: destino, st: "ok", note: "", tipo: "despesa" };
+    const o = { d: it.d, desc: it.desc, v: Math.abs(it.vs), fitid: it.fitid, alvo: destino, st: "ok", note: "", tipo: "despesa", fat: card && it.fat ? it.fat : null };
     if (it.fitid && existentes.some(l => l.fitid === it.fitid)) return { ...o, st: "link", note: "Já importado antes (mesmo identificador do banco)" };
     const sug = sugerirCat(S, it.desc);
     if (card) {
@@ -165,16 +188,16 @@ function analisar(S, itens, destino, faturaKey) {
         const orig = existentes.find(l => l.tipo === "despesa" && l.valor === o.v && parecido(l.desc, it.desc));
         return { ...o, tipo: "estorno", st: "estorno", cat: orig ? orig.cat : sug ? sug.cat : outrasD, sub: orig ? orig.sub : "", estornoDe: orig ? orig.id : null, note: orig ? `Estorno da compra de ${brs(orig.data)}` : "Crédito na fatura (estorno), sem compra original encontrada" };
       }
-      const pc = achaParcela(it.desc);
+      const pc = it.parc ? { k: it.parc.k, n: it.parc.n, limpa: it.desc } : achaParcela(it.desc);
       if (pc) {
         const ex = S.parc.find(p => p.cartao === destino && p.n === pc.n && Math.abs(parcVal(p, 2) - o.v) <= 1 && parecido(p.desc, pc.limpa || it.desc));
         if (ex) return { ...o, st: "link", note: `Parcela ${pc.k}/${pc.n} de “${ex.desc}” já projetada · não será recriada` };
-        const base = faturaKey || keyOf(card, it.d);
+        const base = it.fat || faturaKey || keyOf(card, it.d);
         return { ...o, st: "parc", n: pc.n, k: pc.k, desc: pc.limpa || it.desc, k0: addYM(base, -(pc.k - 1)), cat: sug ? sug.cat : outrasD, sub: sug ? sug.sub : "", note: `Parcela ${pc.k}/${pc.n} encontrada: cria parcelamento de ${pc.n} × ${fmt(o.v)} = ${fmt(o.v * pc.n)}, 1ª na fatura de ${ymLabel(addYM(base, -(pc.k - 1)))}` };
       }
       const dup = existentes.find(l => (l.tipo === "despesa") && l.valor === o.v && diasEntre(l.data, it.d) <= 2 && parecido(l.desc, it.desc));
       if (dup) return { ...o, st: "dup", cat: dup.cat, note: `Parecido com “${dup.desc}” de ${brs(dup.data)}, já registrado` };
-      return { ...o, cat: sug && sug.cat !== "Transferência" ? sug.cat : outrasD, sub: sug ? sug.sub : "", note: sug ? `Categoria pela regra “${sug.regra}”` : "" };
+      return { ...o, cat: sug && sug.cat !== "Transferência" ? sug.cat : outrasD, sub: sug ? sug.sub : "", note: [o.fat ? `Fatura de ${ymLabel(o.fat)}` : "", sug ? `Categoria pela regra “${sug.regra}”` : ""].filter(Boolean).join(" · ") };
     }
     // conta bancária
     const ehFatura = /PAG(AMENTO|TO)?\s*(DE\s*)?FAT|FATURA\s*CART|PGTO\s*CART/i.test(norm(it.desc)) || (sug && sug.cat === "Transferência");
