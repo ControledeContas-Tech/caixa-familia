@@ -69,6 +69,12 @@ const DB = {
     for (const t of ORDEM) this.snap[t] = new Map(TABELAS[t].rows(S).map(r => [r.id, JSON.stringify(r)]));
     return S;
   },
+  // há alteração em alguma tabela desde a última gravação/carga? (não olha a auditoria)
+  temMudanca(S) {
+    garanteIds(S);
+    for (const t of ORDEM) { const atual = TABELAS[t].rows(S), ant = this.snap[t] || new Map(); if (atual.length !== ant.size) return true; for (const r of atual) if (ant.get(r.id) !== JSON.stringify(r)) return true; }
+    return false;
+  },
   sync(S) {
     this.fila = this.fila.then(() => this._sync(S)).catch(() => {});
     return this.fila;

@@ -1,6 +1,19 @@
 // ================= INTERFACE =================
 let S = null, SB = null, FAM = null, ME = null;
-const save = () => { if (S && FAM && ui.screen === "app") DB.sync(S); };
+const save = () => { if (!(S && FAM && ui.screen === "app")) return; if (somenteLeitura()) return descartarLeitura(); DB.sync(S); };
+// devolve "revertido" quando o modo consulta desfez uma alteração
+// acesso vencido ou administrador geral olhando outra família: pode consultar e exportar, nada é gravado
+const somenteLeitura = () => ui.screen === "app" && (!!ui.adminVendo || !!(ui.acesso && ui.acesso.status === "vencido"));
+const msgLeitura = () => ui.adminVendo ? "Você está vendo outra família como administrador geral. Nada é alterado aqui." : `Seu acesso venceu${ui.acesso && ui.acesso.valido_ate ? " em " + br(ui.acesso.valido_ate) : ""}. Você pode consultar e exportar; para lançar, peça a renovação a João Lucas ou Emanoella.`;
+// formulários que não alteram dados e continuam valendo no modo consulta
+const FORMS_LEITURA = new Set(["periodo", "senha", "mfaok"]);
+function descartarLeitura() {
+  S.audit.forEach(a => a._s = 1);
+  if (!DB.temMudanca(S)) return;
+  setTimeout(() => toast(msgLeitura()), 0);
+  DB.carregar(FAM, S.user).then(n => { S = n; render(); }).catch(() => {});
+  return "revertido";
+}
 
 const ui = { screen: "carregando", msg: "", view: "painel", hz: "mes", lf: { mes: CUR, conta: "", cat: "", resp: "", tipo: "", q: "" }, card: null, cardKey: null, compMes: CUR, compTab: "pagar", plan: "previsto", varMes: null, simOrc: null, aj: "contas", more: false, userMenu: false, impDone: null, salvando: "ok", membros: [], convites: [], fatores: null, enroll: null };
 try { const h = location.hash.slice(1); if (/^[a-z]+$/.test(h)) ui.view = h; } catch (e) {}
@@ -897,10 +910,17 @@ function vAuth() {
   if (s === "carregando") return card(`<p class="sub">Carregando seus dados…</p>`);
   if (s === "config") return card(`<h1>Configuração pendente</h1><p class="sub">Falta colar a chave pública (anon) do Supabase no arquivo <code>js/config.js</code> do repositório. Depois de salvar, aguarde cerca de 1 minuto e recarregue esta página.</p>`);
   if (s === "login") return card(`<h1>Entrar</h1>${msg}<form class="form one" data-form="entrar">${field("E-mail", `<input id="lg-e" name="email" type="email" required autocomplete="username" value="${esc(ui.authEmail || "")}">`, true, "lg-e")}${field("Senha", `<input id="lg-s" name="senha" type="password" required autocomplete="current-password">`, true, "lg-s")}<button class="btn primary block">Entrar</button></form><div class="auth-links"><button class="linkbtn" data-act="tela" data-arg="cadastro">Criar conta</button><button class="linkbtn" data-act="tela" data-arg="esqueci">Esqueci minha senha</button></div>`);
-  if (s === "cadastro") return card(`<h1>Criar conta</h1>${msg}<form class="form one" data-form="cadastro">${field("Seu nome", `<input id="cd-n" name="nome" required autocomplete="given-name">`, true, "cd-n")}${field("E-mail", `<input id="cd-e" name="email" type="email" required autocomplete="email" value="${esc(ui.authEmail || "")}">`, true, "cd-e")}${field("Senha (mínimo 10 caracteres)", `<input id="cd-s" name="senha" type="password" required minlength="10" autocomplete="new-password">`, true, "cd-s")}<button class="btn primary block">Criar conta</button></form><p class="sub">Se alguém da família já te convidou, use o mesmo e-mail do convite.</p><div class="auth-links"><button class="linkbtn" data-act="tela" data-arg="login">Já tenho conta</button></div>`);
+  if (s === "cadastro") return card(`<h1>Criar conta</h1>${msg}<form class="form one" data-form="cadastro">${field("Seu nome", `<input id="cd-n" name="nome" required autocomplete="given-name">`, true, "cd-n")}${field("CPF", `<input id="cd-c" name="cpf" required inputmode="numeric" autocomplete="off" placeholder="000.000.000-00" maxlength="14" data-cpf>`, true, "cd-c")}${field("E-mail", `<input id="cd-e" name="email" type="email" required autocomplete="email" value="${esc(ui.authEmail || "")}">`, true, "cd-e")}${field("Senha (mínimo 10 caracteres)", `<input id="cd-s" name="senha" type="password" required minlength="10" autocomplete="new-password">`, true, "cd-s")}<button class="btn primary block">Criar conta</button></form><p class="sub">Depois de criar a conta, ela fica aguardando liberação pelos administradores do sistema. Se alguém da família já te convidou, use o mesmo e-mail do convite.</p><div class="auth-links"><button class="linkbtn" data-act="tela" data-arg="login">Já tenho conta</button></div>`);
   if (s === "esqueci") return card(`<h1>Recuperar senha</h1>${msg}<form class="form one" data-form="esqueci">${field("E-mail", `<input id="rs-e" name="email" type="email" required autocomplete="email" value="${esc(ui.authEmail || "")}">`, true, "rs-e")}<button class="btn primary block">Enviar link</button></form><div class="auth-links"><button class="linkbtn" data-act="tela" data-arg="login">Voltar</button></div>`);
   if (s === "novasenha") return card(`<h1>Nova senha</h1>${msg}<form class="form one" data-form="novasenha">${field("Nova senha (mínimo 10 caracteres)", `<input id="ns-s" name="senha" type="password" required minlength="10" autocomplete="new-password">`, true, "ns-s")}<button class="btn primary block">Salvar e entrar</button></form>`);
   if (s === "mfa") return card(`<h1>Verificação em duas etapas</h1>${msg}<p class="sub">Digite o código de 6 dígitos do seu aplicativo autenticador.</p><form class="form one" data-form="mfa">${field("Código", `<input id="mf-l" name="code" inputmode="numeric" maxlength="6" required autocomplete="one-time-code" class="otp">`, true, "mf-l")}<button class="btn primary block">Entrar</button></form><div class="auth-links"><button class="linkbtn" data-act="sair">Usar outra conta</button></div>`);
+  const sairLink = `<div class="auth-links"><button class="linkbtn" data-act="reverificar">Verificar de novo</button><button class="linkbtn" data-act="sair">Sair</button></div>`;
+  const quem = ME ? `<p class="sub">Conectado como <b>${esc(ME.nome || ME.email)}</b> · ${esc(ME.email)}</p>` : "";
+  if (s === "cpf") return card(`<h1>Complete seu cadastro</h1>${msg}<p class="sub">${ui.acesso && ui.acesso.super_pendente ? "Para ativar a administração geral, cadastre o seu CPF. Ele fica vinculado ao seu acesso de administrador e não pode ser trocado depois por aqui." : "Para continuar usando o sistema, informe o seu CPF. Ele identifica a sua conta para os administradores."}</p>
+    <form class="form one" data-form="cpf">${field("CPF", `<input id="cp-c" name="cpf" required inputmode="numeric" autocomplete="off" placeholder="000.000.000-00" maxlength="14" data-cpf>`, true, "cp-c")}<button class="btn primary block">Salvar CPF</button></form>${quem}<div class="auth-links"><button class="linkbtn" data-act="sair">Sair</button></div>`);
+  if (s === "pendente") return card(`<h1>Aguardando liberação</h1>${msg}<div class="hint-box">Sua conta foi criada e está na fila de aprovação. Assim que João Lucas ou Emanoella liberarem o acesso, você entra direto por aqui.</div>${quem}${sairLink}`);
+  if (s === "bloqueado") return card(`<h1>Acesso bloqueado</h1>${msg}<div class="hint-box erro">O acesso desta conta está bloqueado pelos administradores do sistema. Fale com João Lucas ou Emanoella.</div>${ui.acesso && ui.acesso.obs ? `<p class="sub">Observação: ${esc(ui.acesso.obs)}</p>` : ""}${quem}${sairLink}`);
+  if (s === "vencido") return card(`<h1>Acesso vencido</h1>${msg}<div class="hint-box erro">Seu acesso venceu${ui.acesso && ui.acesso.valido_ate ? " em " + br(ui.acesso.valido_ate) : ""}. Peça a renovação a João Lucas ou Emanoella.</div>${quem}${sairLink}`);
   if (s === "familia") return card(`<h1>Bem-vindo${ME && ME.nome ? ", " + esc(ME.nome) : ""}</h1>${msg}<p class="sub">Crie o espaço da sua família. Ele começa vazio, com categorias e regras de classificação prontas. Depois você convida as outras pessoas, que entram com o próprio e-mail.</p>
     <form class="form one" data-form="criarfam">${field("Nome da família", `<input id="cf-f" name="familia" required value="Família ${esc(ME && ME.nome ? ME.nome : "")}">`, true, "cf-f")}${field("Seu nome", `<input id="cf-n" name="nome" required value="${esc(ME && ME.nome ? ME.nome : "")}">`, true, "cf-n")}${field("Começar o controle em", `<input id="cf-i" name="inicio" type="month" required value="${CUR}">`, true, "cf-i")}
     <button class="btn primary block">Criar família</button></form><p class="sub">Recebeu convite? Saia e entre com o e-mail convidado. Conectado como ${esc(ME ? ME.email : "")}. <button class="linkbtn" data-act="sair">Sair</button></p>`, true);
@@ -924,10 +944,17 @@ function render() {
   app.innerHTML = `<aside class="rail"><div class="brand"><i>R$</i>Caixa da Família</div>
     <nav class="nav" aria-label="Principal">${VIEWS.map(([k, l]) => `<button data-go="${k}" class="${primary.includes(k) ? "" : "sec"}" ${k === ui.view ? 'aria-current="page"' : ""}>${icon(k)}<span>${l}</span></button>`).join("")}<button class="more-btn" data-act="mais" aria-expanded="${ui.more}">${icon("mais")}<span>Mais</span></button></nav>
     <div class="who"><b>${esc(FAM.nome)}</b><span>${esc(ME.nome)} · hoje ${br(TODAY)}</span>${syncBadge()}</div></aside>
-    <main><div class="wrap">${VIEWFN[ui.view]()}</div></main>
+    <main><div class="wrap">${avisoAcesso()}${VIEWFN[ui.view]()}</div></main>
     ${ui.more ? `<div class="scrim" data-act="mais"></div><div class="sheet" role="menu">${VIEWS.filter(v => !primary.includes(v[0])).map(([k, l]) => `<button data-go="${k}">${icon(k)}<span>${l}</span></button>`).join("")}</div>` : ""}`;
 }
-function commit(msg) { save(); render(); if (msg) toast(msg); }
+function avisoAcesso() {
+  if (ui.adminVendo) return `<div class="aviso info"><span>Você está vendo a <b>${esc(ui.adminVendo)}</b> como administrador geral. Somente leitura.</span><button class="mini" data-act="adminvoltar">Voltar para a minha família</button></div>`;
+  const a = ui.acesso; if (!a || a.super) return "";
+  if (a.status === "vencido") return `<div class="aviso crit"><span>${msgLeitura()}</span><button class="mini" data-act="exportar">Exportar meus dados</button></div>`;
+  if (a.valido_ate) { const d = diasAte(TODAY, a.valido_ate); if (d <= 7) return `<div class="aviso warn"><span>Seu acesso vence ${d === 0 ? "hoje" : d === 1 ? "amanhã" : "em " + d + " dias"} (${br(a.valido_ate)}). Peça a renovação a João Lucas ou Emanoella.</span></div>`; }
+  return "";
+}
+function commit(msg) { const r = save(); render(); if (msg && r !== "revertido") toast(msg); }
 
 // ---------- sessão ----------
 async function boot() {
@@ -949,8 +976,12 @@ async function entrar() {
     if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== "aal2") { ui.screen = "mfa"; ui.msg = ""; return render(); }
     const { data: { user } } = await SB.auth.getUser();
     ME = { id: user.id, email: user.email, nome: (user.user_metadata && user.user_metadata.nome) || "" };
+    const { data: ac, error: ea } = await SB.rpc("meu_acesso"); if (ea) throw ea;
+    ui.acesso = ac || {}; ui.adminVendo = null; if (ui.acesso.nome && !ME.nome) ME.nome = ui.acesso.nome;
+    if (!ui.acesso.cpf_ok) { ui.screen = "cpf"; ui.msg = ""; return render(); }
+    if (ui.acesso.status === "pendente" || ui.acesso.status === "bloqueado") { ui.screen = ui.acesso.status; ui.msg = ""; return render(); }
     const { data: fid, error } = await SB.rpc("aceitar_convite"); if (error) throw error;
-    if (!fid) { ui.screen = "familia"; ui.msg = ""; return render(); }
+    if (!fid) { ui.screen = ui.acesso.status === "vencido" ? "vencido" : "familia"; ui.msg = ""; return render(); }
     await carregarFamilia(fid);
   } catch (e) { console.error(e); ui.screen = "login"; ui.msg = "Não foi possível carregar: " + esc(e.message || e); ui.msgErro = true; render(); }
 }
@@ -976,7 +1007,8 @@ async function substituirDados(novo, acao) {
 const acao = fn => async (...a) => { try { await fn(...a); } catch (e) { console.error(e); toast("Erro: " + (e.message || e)); } };
 Object.assign(acts, {
   tela: a => { ui.screen = a; ui.msg = ""; render(); },
-  sair: acao(async () => { await SB.auth.signOut(); S = null; FAM = null; ME = null; ui.screen = "login"; ui.msg = ""; ui.userMenu = false; ui.fatores = null; ui.enroll = null; closeLayer(); render(); }),
+  reverificar: () => entrar(),
+  sair: acao(async () => { await SB.auth.signOut(); S = null; FAM = null; ME = null; ui.acesso = null; ui.adminVendo = null; ui.screen = "login"; ui.msg = ""; ui.userMenu = false; ui.fatores = null; ui.enroll = null; closeLayer(); render(); }),
   sairoutros: acao(async () => { const { error } = await SB.auth.signOut({ scope: "others" }); if (error) throw error; toast("Os outros dispositivos foram desconectados."); }),
   mfaon: acao(async () => { const { data, error } = await SB.auth.mfa.enroll({ factorType: "totp", friendlyName: "Autenticador " + new Date().toISOString().slice(0, 10) }); if (error) throw error; ui.enroll = { id: data.id, qr: data.totp.qr_code, secret: data.totp.secret }; render(); }),
   mfaoff: acao(async a => { const { error } = await SB.auth.mfa.unenroll({ factorId: a }); if (error) throw error; audit("Desativou verificação em duas etapas", ME.email); ui.fatores = null; commit("Verificação em duas etapas desativada."); }),
@@ -1003,7 +1035,8 @@ const authForm = fn => async f => { ui.msg = ""; ui.msgErro = false; try { retur
 function traduzErro(e) { const m = String(e && e.message || e); if (/Invalid login/i.test(m)) return "E-mail ou senha incorretos."; if (/Email not confirmed/i.test(m)) return "Confirme seu e-mail pelo link que enviamos antes de entrar."; if (/already registered|already been registered/i.test(m)) return "Este e-mail já tem conta. Use “Entrar” ou “Esqueci minha senha”."; if (/Invalid TOTP|invalid.*code/i.test(m)) return "Código inválido. Confira o horário do celular e tente o código atual."; if (/rate limit/i.test(m)) return "Muitas tentativas. Aguarde alguns minutos."; if (/Password should/i.test(m)) return "A senha precisa ter pelo menos 10 caracteres."; return m; }
 Object.assign(forms, {
   entrar: authForm(async f => { ui.authEmail = f.elements.email.value.trim(); const { error } = await SB.auth.signInWithPassword({ email: ui.authEmail, password: f.elements.senha.value }); if (error) throw error; await entrar(); return false; }),
-  cadastro: authForm(async f => { ui.authEmail = f.elements.email.value.trim(); const { data, error } = await SB.auth.signUp({ email: ui.authEmail, password: f.elements.senha.value, options: { data: { nome: f.elements.nome.value.trim() }, emailRedirectTo: URL_APP() } }); if (error) throw error; if (data.session) { await entrar(); return false; } ui.screen = "login"; ui.msg = `Enviamos um link de confirmação para <b>${esc(ui.authEmail)}</b>. Abra o e-mail, confirme e volte para entrar.`; render(); return false; }),
+  cadastro: authForm(async f => { const cpf = soDigitos(f.elements.cpf.value); if (!cpfValido(cpf)) throw new Error("CPF inválido. Confira os números."); ui.authEmail = f.elements.email.value.trim(); const { data, error } = await SB.auth.signUp({ email: ui.authEmail, password: f.elements.senha.value, options: { data: { nome: f.elements.nome.value.trim(), cpf }, emailRedirectTo: URL_APP() } }); if (error) throw error; if (data.session) { await entrar(); return false; } ui.screen = "login"; ui.msg = `Enviamos um link de confirmação para <b>${esc(ui.authEmail)}</b>. Abra o e-mail, confirme e volte para entrar.`; render(); return false; }),
+  cpf: authForm(async f => { const cpf = soDigitos(f.elements.cpf.value); if (!cpfValido(cpf)) throw new Error("CPF inválido. Confira os números."); const { error } = await SB.rpc("definir_meu_cpf", { p_cpf: cpf }); if (error) throw error; await entrar(); return false; }),
   esqueci: authForm(async f => { ui.authEmail = f.elements.email.value.trim(); const { error } = await SB.auth.resetPasswordForEmail(ui.authEmail, { redirectTo: URL_APP() }); if (error) throw error; ui.screen = "login"; ui.msg = "Se houver uma conta com esse e-mail, enviamos um link para criar uma nova senha."; render(); return false; }),
   novasenha: authForm(async f => { const { error } = await SB.auth.updateUser({ password: f.elements.senha.value }); if (error) throw error; history.replaceState(null, "", location.pathname); await entrar(); return false; }),
   mfa: authForm(async f => { const { data: fs, error: e1 } = await SB.auth.mfa.listFactors(); if (e1) throw e1; const fator = (fs.totp || []).find(x => x.status === "verified"); const { error } = await SB.auth.mfa.challengeAndVerify({ factorId: fator.id, code: f.elements.code.value.trim() }); if (error) throw error; await entrar(); return false; }),
@@ -1050,6 +1083,7 @@ document.addEventListener("keydown", e => {
 document.addEventListener("submit", async e => {
   const f = e.target, name = f.dataset.form; if (!name || !forms[name]) return;
   e.preventDefault();
+  if (somenteLeitura() && !FORMS_LEITURA.has(name)) { toast(msgLeitura()); return; }
   const btn = f.querySelector("button:not([type=button])"); if (btn) btn.disabled = true;
   let msg;
   try { msg = await forms[name](f); } catch (err) { console.error(err); toast("Erro: " + (err.message || err)); msg = false; }
@@ -1071,6 +1105,7 @@ document.addEventListener("change", e => {
   else if (t.id === "arquivos" && t.files.length) { lerArquivos([...t.files]); t.value = ""; }
   else if (t.form && t.form.id === "fnovo") { if (t.name === "cat") t.dataset.touched = "1"; novoHint(); }
 });
+document.addEventListener("input", e => { const t = e.target; if (t.dataset && "cpf" in t.dataset) { const d = soDigitos(t.value).slice(0, 11); t.value = d.length > 9 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : d.length > 6 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}` : d.length > 3 ? `${d.slice(0, 3)}.${d.slice(3)}` : d; t.setCustomValidity(d.length === 11 && !cpfValido(d) ? "CPF inválido" : ""); } });
 document.addEventListener("input", e => { if (e.target.form && e.target.form.id === "fnovo" && (e.target.name === "desc" || e.target.name === "valor")) novoHint(); });
 document.addEventListener("dragover", e => { const z = e.target.closest && e.target.closest("#dropzone"); if (z) { e.preventDefault(); z.classList.add("over"); } });
 document.addEventListener("dragleave", e => { const z = e.target.closest && e.target.closest("#dropzone"); if (z) z.classList.remove("over"); });

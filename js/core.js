@@ -283,6 +283,17 @@ function compStatus(c) {
   if (c.pago > 0) return "parcial";
   return ymOf(c.venc) <= CUR ? "pendente" : "prevista";
 }
+// CPF: só dígitos, com os dois dígitos verificadores conferidos
+const soDigitos = s => String(s || "").replace(/\D/g, "");
+function cpfValido(s) {
+  const d = soDigitos(s); if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  for (const n of [9, 10]) { let t = 0; for (let i = 0; i < n; i++) t += +d[i] * (n + 1 - i); if ((t * 10) % 11 % 10 !== +d[n]) return false; }
+  return true;
+}
+const cpfFmt = s => { const d = soDigitos(s); return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : d; };
+// dias entre duas datas ISO (b - a)
+const diasAte = (a, b) => Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10))) / 864e5);
+
 // recorrência parcelada: número da parcela no mês (null se não for parcelada)
 const recParcela = (r, ym) => r.parcTotal ? (r.parcIni ?? 1) + ymDiff(r.inicio, ym) : null;
 // "Empréstimo (07/10)" → { desc: "Empréstimo", n: 7, total: 10 }
@@ -389,4 +400,4 @@ function simular(S, orcamento, estrategia) {
 // sugestão de categoria pelas regras explícitas
 function sugerirCat(S, desc) { const n = norm(desc); const r = [...S.regras].sort((a, b) => a.prio - b.prio).find(r => n.includes(norm(r.trecho))); return r ? { cat: r.cat, sub: r.sub, regra: r.trecho } : null; }
 
-if (typeof module !== "undefined") module.exports = { vazio, rid, parcVal, fatItens, ativo, sugerirCat, closeOf, dueOf, parseBRL, norm, ymOf, ymDiff, addDays, investAportado, investRend, netConta, seed, saldoLivre, cardResumo, fatura, cardOf, caixa, compromissos, projecao, simular, gastosMes, saldoConta, investSaldo, keyOf, fmt, TODAY, CUR, mk, addYM, receitasMes, provReservado };
+if (typeof module !== "undefined") module.exports = { cpfValido, cpfFmt, diasAte, vazio, rid, parcVal, fatItens, ativo, sugerirCat, closeOf, dueOf, parseBRL, norm, ymOf, ymDiff, addDays, investAportado, investRend, netConta, seed, saldoLivre, cardResumo, fatura, cardOf, caixa, compromissos, projecao, simular, gastosMes, saldoConta, investSaldo, keyOf, fmt, TODAY, CUR, mk, addYM, receitasMes, provReservado };
