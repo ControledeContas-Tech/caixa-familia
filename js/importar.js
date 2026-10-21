@@ -68,6 +68,65 @@ function parseOFX(texto) {
   }).filter(i => i.d && !isNaN(i.vs) && i.vs !== 0);
   return { itens, cartao: /<CCSTMTRS>/i.test(texto), banco: tag(texto, "ORG") || tag(texto, "BANKID"), conta: tag(texto, "ACCTID") };
 }
+// ---------- print / foto de fatura ou extrato (texto vindo do reconhecimento de imagem) ----------
+const BANCOS_IMG = [["NUBANK", "Nubank"], ["NU PAGAMENTOS", "Nubank"], ["ITAU", "Itaú"], ["ITAUCARD", "Itaú"], ["BRADESCO", "Bradesco"], ["SANTANDER", "Santander"], ["BANCO INTER", "Inter"], ["INTER ", "Inter"], ["C6 BANK", "C6"], ["C6 ", "C6"], ["CAIXA", "Caixa"], ["BANCO DO BRASIL", "Banco do Brasil"], ["OUROCARD", "Banco do Brasil"], ["CARREFOUR", "Carrefour"], ["CASAS BAHIA", "Casas Bahia"], ["PERNAMBUCANAS", "Pernambucanas"], ["MERCADO PAGO", "Mercado Pago"], ["PICPAY", "PicPay"], ["NEON", "Neon"], ["BANCO PAN", "Pan"], ["XP ", "XP"], ["BTG", "BTG"], ["SICREDI", "Sicredi"], ["SICOOB", "Sicoob"], ["WILL BANK", "Will Bank"], ["PORTO SEGURO", "Porto Seguro"], ["RIACHUELO", "Riachuelo"], ["RENNER", "Renner"], ["AMERICANAS", "Americanas"], ["MAGALU", "Magalu"], ["MAGAZINE LUIZA", "Magalu"]];
+const MESES_IMG = { JAN: 1, FEV: 2, MAR: 3, ABR: 4, MAI: 5, JUN: 6, JUL: 7, AGO: 8, SET: 9, OUT: 10, NOV: 11, DEZ: 12 };
+// linhas de resumo da fatura/extrato que não são lançamentos
+const RESUMO_IMG = /\b(TOTAL|SALDO|LIMITE|PAGAMENTO MINIMO|VALOR MINIMO|MINIMO|VENCIMENTO|VENCE EM|FECHAMENTO|FECHA EM|FATURA ATUAL|FATURA FECHADA|FATURA ABERTA|VALOR DA FATURA|PROXIMA FATURA|JUROS|ENCARGOS|IOF|CET|DISPONIVEL|PARCELAR FATURA|RESUMO)\b/;
+function anoProvavel(m, d, hoje) {
+  const [hy, hm] = hoje.split("-").map(Number);
+  let y = hy; if (m > hm + 1) y--; // print de fatura: datas futuras distantes são do ano anterior
+  return `${y}-${pad(m)}-${pad(d)}`;
+}
+function dataDaLinha(L, hoje) {
+  let m = L.match(/^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2,4}))?\b/);
+  if (m) { const d = +m[1], mm = +m[2]; if (d >= 1 && d <= 31 && mm >= 1 && mm <= 12) { const iso = m[3] ? `${m[3].length === 2 ? "20" + m[3] : m[3]}-${pad(mm)}-${pad(d)}` : anoProvavel(mm, d, hoje); return { iso, resto: L.slice(m[0].length) }; } }
+  m = L.match(/^(?:[A-Z]{3,9},?\s+)?(\d{1,2})\s*(?:DE\s+)?(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)[A-Z]*\.?(?:\s*(?:DE\s+)?(\d{4}))?/);
+  if (m) { const d = +m[1], mm = MESES_IMG[m[2]]; if (d >= 1 && d <= 31) return { iso: m[3] ? `${m[3]}-${pad(mm)}-${pad(d)}` : anoProvavel(mm, d, hoje), resto: L.slice(m.index + m[0].length) }; }
+  if (/^HOJE\b/.test(L)) return { iso: hoje, resto: L.replace(/^HOJE\b/, "") };
+  if (/^ONTEM\b/.test(L)) { const t = new Date(hoje + "T12:00:00Z"); t.setUTCDate(t.getUTCDate() - 1); return { iso: t.toISOString().slice(0, 10), resto: L.replace(/^ONTEM\b/, "") }; }
+  return null;
+}
+// valor no formato brasileiro (exige vírgula com 2 casas para não confundir com datas e parcelas)
+const VALOR_IMG = /([+\-−–—]\s*)?(?:R\s?\$\s*)?([+\-−–—]\s*)?(?<![\d\/])(\d{1,3}(?:\.\d{3})*,\d{2})(?!\d)/g;
+function lerTextoImagem(texto, hoje = TODAY) {
+  const brutas = String(texto || "").split(/\r?\n/).map(l => l.replace(/[|_“”"'`~]+/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const N = norm(brutas.join(" \n "));
+  const banco = (BANCOS_IMG.find(([k]) => (" " + N + " ").includes(" " + k) || N.includes(k)) || [])[1] || null;
+  const cartao = /FATURA|CARTAO|LIMITE (DISPONIVEL|TOTAL)|FINAL \d{4}/.test(N);
+  const itens = []; let dataAtual = null, descPend = "", ignorados = 0, ultimaLinhaItem = false;
+  for (const bruta of brutas) {
+    let L = norm(bruta);
+    const dt = dataDaLinha(L, hoje);
+    let linhaData = null;
+    if (dt) { linhaData = dt.iso; L = dt.resto.trim(); }
+    const valores = [...L.matchAll(VALOR_IMG)];
+    if (!valores.length) {
+      // "Parcela 2/10" na linha de baixo do valor: pertence à compra anterior
+      if (!linhaData && itens.length && ultimaLinhaItem && /^(PARCELA|PARC\.?)\s*\d{1,2}\s*(\/|DE)\s*\d{1,2}$/.test(L) && !achaParcela(itens[itens.length - 1].desc)) { itens[itens.length - 1].desc += " " + bruta.trim(); ultimaLinhaItem = false; continue; }
+      ultimaLinhaItem = false;
+      if (linhaData && !L.replace(/[^A-Z]/g, "")) { dataAtual = linhaData; descPend = ""; continue; } // cabeçalho de dia ("20 OUT")
+      if (linhaData) dataAtual = linhaData;
+      if (RESUMO_IMG.test(L)) { descPend = ""; continue; }
+      if (/[A-Z]{3,}/.test(L)) descPend = (descPend && descPend.length < 40 && !linhaData ? descPend + " " : "") + bruta.slice(bruta.length - L.length).trim();
+      continue;
+    }
+    if (RESUMO_IMG.test(L)) { descPend = ""; ignorados++; continue; }
+    const vm = valores[valores.length - 1];
+    let v = parseValor(vm[3]); if (!(v > 0)) { ignorados++; continue; }
+    const sinalAntes = (vm[1] || vm[2] || "") + L.slice(Math.max(0, vm.index - 2), vm.index);
+    const neg = /[\-−–—]/.test(sinalAntes) || /\b(ESTORNO|CREDITO|PAGAMENTO RECEBIDO|DEVOLUCAO)\b/.test(L);
+    // descrição: o que sobra na linha sem o valor; se não sobrar nada, a linha anterior
+    let desc = bruta.slice(bruta.length - (dt ? dt.resto.length : bruta.length)).replace(VALOR_IMG, " ").replace(/\bR\s?\$\s*/gi, " ").replace(/\s+/g, " ").replace(/^[\s\-–—−•·:]+|[\s\-–—−•·:+]+$/g, "").trim();
+    if (!/[A-Za-zÀ-ú]{2,}/.test(desc)) desc = descPend;
+    else if (descPend && /^(PARCELA|PARC\.?)?\s*\d{1,2}\s*(\/|DE)\s*\d{1,2}$/i.test(norm(desc))) desc = descPend + " " + desc; // "Mercado Livre" + "Parcela 2/10"
+    descPend = "";
+    const d = linhaData || dataAtual;
+    if (!d || !desc) { ignorados++; continue; }
+    itens.push({ d, desc: desc.slice(0, 120), vs: neg ? -v : v, fitid: null }); ultimaLinhaItem = true;
+  }
+  return { itens, ignorados, banco, cartao, linhas: brutas.length };
+}
 function lerArquivo(nome, texto) {
   const ext = (nome.split(".").pop() || "").toLowerCase();
   if (ext === "ofx" || /<OFX>/i.test(texto.slice(0, 2000))) return { formato: "OFX", ...parseOFX(texto) };
@@ -138,4 +197,4 @@ function analisar(S, itens, destino, faturaKey) {
 const catsDespesa = S => S.categorias.filter(c => c[1] !== "receita").map(c => c[0]);
 const catsReceita = S => S.categorias.filter(c => c[1] === "receita").map(c => c[0]);
 
-if (typeof module !== "undefined") module.exports = { parseCSV, parseOFX, parseValor, parseDataBR, lerArquivo, analisar, achaParcela, parecido, IMP_PEND, IMP_GRAVA };
+if (typeof module !== "undefined") module.exports = { lerTextoImagem, dataDaLinha, parseCSV, parseOFX, parseValor, parseDataBR, lerArquivo, analisar, achaParcela, parecido, IMP_PEND, IMP_GRAVA };
