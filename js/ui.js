@@ -104,6 +104,7 @@ function topbar(title, sub = "") {
   return `<header class="topbar"><div class="tt"><h1>${title}</h1>${sub ? `<div class="sub">${sub}</div>` : ""}</div>
     <label class="search">${icon("busca")}<input id="busca" type="search" placeholder="Buscar lançamentos" aria-label="Buscar lançamentos" value="${esc(ui.lf.q)}"></label>
     <button class="btn primary" data-act="novo">+ Lançamento</button>
+    ${typeof sinoNotif === "function" ? sinoNotif() : ""}
     <div class="user"><button class="avatar" data-act="usermenu" aria-label="Menu do usuário">${S.user[0]}</button>${ui.userMenu ? `<div class="menu"><div class="sub">Conectado como <b>${esc(S.user)}</b><br>${esc(ME ? ME.email : "")}<br>${ME && ME.papel === "admin" ? "Administrador" : "Membro"}</div><button data-go="ajustes" data-aj="seguranca">Segurança</button><button data-act="sair">Sair</button></div>` : ""}</div></header>`;
 }
 const head = (h2, right = "") => `<div class="panel-head"><h2>${h2}</h2>${right}</div>`;
@@ -661,7 +662,21 @@ const closeLayer = () => { layer().innerHTML = ""; };
 function modal(title, body, wide = false) { layer().innerHTML = `<div class="scrim" data-close></div><div class="modal ${wide ? "wide" : ""}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-h"><h3>${title}</h3><button class="mini" data-close aria-label="Fechar">Fechar</button></div>${body}</div>`; const f = layer().querySelector("input:not([type=hidden]):not([disabled]),select"); if (f) f.focus(); }
 function drawer(title, eyebrow, body) { layer().innerHTML = `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="drawer-top"><span class="eyebrow">${eyebrow}</span><button class="mini" data-close>Fechar</button></div><h3>${title}</h3>${body}</aside>`; }
 let toastT;
-function toast(msg) { let t = document.getElementById("toast"); if (!t) { t = document.createElement("div"); t.id = "toast"; t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); } t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 3600); }
+// aviso na parte de baixo da tela; também fica guardado na tela de Notificações (js/notif.js)
+function toast(msg, tipo, det) {
+  msg = String(msg); tipo = tipo || (window.NOTIF ? NOTIF.tipo(msg) : "ok");
+  if (window.NOTIF) NOTIF.registrar(msg, tipo, det);
+  let t = document.getElementById("toast"); if (!t) { t = document.createElement("div"); t.id = "toast"; document.body.appendChild(t); }
+  t.className = "toast t-" + tipo; t.setAttribute("role", tipo === "erro" ? "alert" : "status");
+  const ver = tipo === "erro" && ui.screen === "app" && VIEWFN.notificacoes;
+  t.innerHTML = `<span class="tmsg"></span>${ver ? '<button class="tver">Ver detalhes</button>' : ""}<button class="tx" aria-label="Fechar aviso">×</button>`;
+  t.querySelector(".tmsg").textContent = msg;
+  const fechar = () => { t.hidden = true; }, dur = tipo === "erro" ? 12000 : Math.min(9000, Math.max(4000, msg.length * 55));
+  t.querySelector(".tx").onclick = fechar;
+  if (ver) t.querySelector(".tver").onclick = () => { fechar(); go("notificacoes"); };
+  t.onmouseenter = () => clearTimeout(toastT); t.onmouseleave = () => { clearTimeout(toastT); toastT = setTimeout(fechar, 3000); };
+  t.hidden = false; clearTimeout(toastT); toastT = setTimeout(fechar, dur);
+}
 const field = (lab, inner, full = false, id = "") => `<div class="field ${full ? "full" : ""}"><label ${id ? `for="${id}"` : ""}>${lab}</label>${inner}</div>`;
 const money = (name, val = "", id = name) => `<span class="money"><span>R$</span><input id="${id}" name="${name}" inputmode="decimal" required placeholder="0,00" value="${val ? (val / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : ""}"></span>`;
 
@@ -1014,7 +1029,7 @@ function vAuth() {
     <button class="btn primary block">Criar família</button></form><p class="sub">Recebeu convite? Saia e entre com o e-mail convidado. Conectado como ${esc(ME ? ME.email : "")}. <button class="linkbtn" data-act="sair">Sair</button></p>`, true);
   return card("");
 }
-function syncBadge() { const s = ui.salvando; return `<span id="syncst" class="sync ${s}">${s === "salvando" ? "Salvando…" : s === "erro" ? "Erro ao salvar" : "Tudo salvo"}</span>`; }
+function syncBadge() { const s = ui.salvando; return s === "erro" ? `<button id="syncst" class="sync erro" data-go="notificacoes" title="Ver o erro">Erro ao salvar · ver</button>` : `<span id="syncst" class="sync ${s}">${s === "salvando" ? "Salvando…" : "Tudo salvo"}</span>`; }
 function estimativas() {
   if (ui.varMes === null) { const ym = addYM(CUR, -1); const v = sum(gastosMes(S, ym).filter(r => !(r.l && (r.l.origem === "recorrência" || r.l.origem === "dívida")) && !(r.i && r.i.parc)), r => r.valor); ui.varMes = Math.max(0, Math.round(v / 1000) * 1000); }
   if (ui.simOrc === null) { const m = sum(S.dividas, d => d.parcela); ui.simOrc = Math.max(10000, Math.round(m * 1.25 / 1000) * 1000); }
@@ -1044,13 +1059,26 @@ function avisoAcesso() {
 }
 function commit(msg) { const r = save(); render(); if (msg && r !== "revertido") toast(msg); }
 
+// traduz o erro técnico do banco para algo legível, mantendo o original
+function explicaErro(m) { return String(m || "").split("\n").filter(Boolean).map(explicaUm).join("\n\n"); }
+function explicaUm(m) {
+  const [tab, ...r] = m.split(": "); const txt = r.join(": ") || m;
+  let dica = "";
+  if (/column .* does not exist|schema cache|could not find the .* column/i.test(txt)) dica = "O banco de dados está desatualizado em relação ao app (falta uma coluna). Avise o administrador para aplicar a atualização do banco.";
+  else if (/failed to fetch|network|load failed|timeout/i.test(txt)) dica = "Sem conexão com a internet ou com o servidor no momento.";
+  else if (/row-level security|permission denied|42501/i.test(txt)) dica = "Sem permissão para gravar (acesso vencido, somente leitura ou sessão expirada). Saia e entre de novo.";
+  else if (/jwt|token/i.test(txt)) dica = "A sessão expirou. Saia e entre de novo.";
+  else if (/duplicate key|unique/i.test(txt)) dica = "Já existe um registro igual no banco.";
+  return (r.length ? "Parte que falhou: " + tab + "\n" : "") + "Mensagem do banco: " + txt + (dica ? "\n\nO que significa: " + dica : "");
+}
+
 // ---------- sessão ----------
 async function boot() {
   const cfg = window.CAIXA_CONFIG || {};
   if (!cfg.url || !cfg.chave || /COLE_AQUI/.test(cfg.chave) || !window.supabase) { ui.screen = "config"; return render(); }
   SB = window.supabase.createClient(cfg.url, cfg.chave, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
   DB.sb = SB;
-  DB.onEstado = (e, m) => { ui.salvando = e; const el = document.getElementById("syncst"); if (el) el.outerHTML = syncBadge(); if (e === "erro") toast("Não foi possível salvar (" + m + "). Confira a internet; a próxima alteração tenta de novo."); };
+  DB.onEstado = (e, m) => { ui.salvando = e; const el = document.getElementById("syncst"); if (el) el.outerHTML = syncBadge(); if (e === "erro") toast("Não foi possível salvar as últimas alterações no banco de dados. Toque em “Ver detalhes” para saber o motivo; a próxima alteração tenta de novo.", "erro", explicaErro(m)); };
   SB.auth.onAuthStateChange(ev => { if (ev === "PASSWORD_RECOVERY") { ui.screen = "novasenha"; ui.msg = ""; render(); } });
   const { data } = await SB.auth.getSession();
   if (ui.screen === "novasenha") return;

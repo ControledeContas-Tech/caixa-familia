@@ -83,22 +83,24 @@ const DB = {
     garanteIds(S);
     const sb = this.sb, F = this.F; let mudou = false;
     this.onEstado("salvando");
-    try {
-      for (const t of ORDEM) {
+    // uma tabela com problema não impede as outras de serem gravadas; o erro é juntado no fim
+    const erros = [];
+    for (const t of ORDEM) {
+      try {
         const atual = TABELAS[t].rows(S), ant = this.snap[t] || new Map(), ids = new Set();
         const up = [];
         for (const r of atual) { ids.add(r.id); const j = JSON.stringify(r); if (ant.get(r.id) !== j) up.push(r); }
         const del = [...ant.keys()].filter(id => !ids.has(id));
-        if (up.length) { mudou = true; for (let i = 0; i < up.length; i += 500) { const { error } = await sb.from(t).upsert(up.slice(i, i + 500).map(r => ({ ...r, familia_id: F })), { onConflict: "familia_id,id" }); if (error) throw new Error(t + ": " + error.message); } }
-        if (del.length) { mudou = true; for (let i = 0; i < del.length; i += 200) { const { error } = await sb.from(t).delete().eq("familia_id", F).in("id", del.slice(i, i + 200)); if (error) throw new Error(t + ": " + error.message); } }
+        if (up.length) { mudou = true; for (let i = 0; i < up.length; i += 500) { const { error } = await sb.from(t).upsert(up.slice(i, i + 500).map(r => ({ ...r, familia_id: F })), { onConflict: "familia_id,id" }); if (error) throw new Error(error.message); } }
+        if (del.length) { mudou = true; for (let i = 0; i < del.length; i += 200) { const { error } = await sb.from(t).delete().eq("familia_id", F).in("id", del.slice(i, i + 200)); if (error) throw new Error(error.message); } }
         this.snap[t] = new Map(atual.map(r => [r.id, JSON.stringify(r)]));
-      }
-      const novos = S.audit.filter(a => !a._s);
-      if (novos.length) { const { error } = await sb.from("auditoria").insert(novos.reverse().map(a => ({ familia_id: F, ts: new Date().toISOString(), usuario: a.user, acao: a.acao, alvo: a.alvo || "", det: a.det || "", ref: a.ref || null }))); if (error) throw new Error("auditoria: " + error.message); novos.forEach(a => a._s = 1); }
-      this.onEstado("ok");
-    } catch (e) {
-      console.error(e); this.onEstado("erro", e.message);
+      } catch (e) { console.error(t, e); erros.push(t + ": " + (e.message || e)); }
     }
+    try {
+      const novos = S.audit.filter(a => !a._s);
+      if (novos.length) { const { error } = await sb.from("auditoria").insert(novos.slice().reverse().map(a => ({ familia_id: F, ts: new Date().toISOString(), usuario: a.user, acao: a.acao, alvo: a.alvo || "", det: a.det || "", ref: a.ref || null }))); if (error) throw new Error(error.message); novos.forEach(a => a._s = 1); }
+    } catch (e) { console.error("auditoria", e); erros.push("auditoria: " + (e.message || e)); }
+    if (erros.length) this.onEstado("erro", erros.join("\n")); else this.onEstado("ok");
     return mudou;
   },
 };
