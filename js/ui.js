@@ -355,11 +355,11 @@ function vImport() {
   const pendentes = todos.filter(i => IMP_PEND.includes(i.st)).length + incompletos + semAlvo + (lendo ? 1 : 0), gravaveis = todos.filter(i => IMP_GRAVA.includes(i.st)).length;
   const destOpts = [...S.contas.map(c => [c.id, "Conta · " + c.nome]), ...S.cartoes.map(c => [c.id, "Cartão · " + c.nome])];
   const semDestino = !destOpts.length;
-  return `${topbar("Importar", "Extratos e faturas em CSV, OFX ou print da tela · PDF na próxima etapa")}
+  return `${topbar("Importar", "Extratos e faturas em PDF, CSV, OFX ou print da tela")}
   ${semDestino ? `<div class="check bad"><b>Cadastre primeiro uma conta ou um cartão.</b> Cada arquivo importado precisa de um destino. <button class="mini" data-go="ajustes" data-aj="contas">Cadastrar conta</button></div>` : `
   <label class="drop" for="arquivos" id="dropzone">
     <span class="drop-i">${icon("importar")}</span>
-    <span class="drop-t"><b>Arraste os arquivos aqui ou clique para escolher</b><span class="sub">CSV, OFX ou <b>print/foto</b> da fatura ou do extrato. Vários de uma vez. Nada é gravado sem a sua confirmação, e um arquivo enviado de novo é reconhecido.</span></span>
+    <span class="drop-t"><b>Arraste os arquivos aqui ou clique para escolher</b><span class="sub"><b>PDF</b>, CSV, OFX ou <b>print/foto</b> da fatura ou do extrato. Vários de uma vez. Nada é gravado sem a sua confirmação, e um arquivo enviado de novo é reconhecido.</span></span>
     <input id="arquivos" type="file" multiple accept=".csv,.ofx,.txt,.pdf,image/*" class="sr">
   </label>
   <div class="paste-bar"><button class="btn" data-act="colarprint">${icon("importar")}<span>Colar print</span></button><span class="sub">Copiou um print? Aperte <b>Ctrl+V</b> aqui na tela (no celular, escolha a imagem pela área acima). A leitura do print é feita no seu aparelho; a imagem não é enviada para nenhum servidor.</span></div>`}
@@ -368,22 +368,23 @@ function vImport() {
     const card = cardOf(S, a.destino), fats = card ? (() => { const r = []; for (let k = addYM(CUR, -3); k <= addYM(CUR, 2); k = addYM(k, 1)) r.push([k, "Fatura de " + ymLong(k)]); return r; })() : [];
     return `<section class="panel flush">
     <div class="panel-head pad imp-head"><div><h2><span class="file"><span class="ext">${esc(a.formato)}</span>${esc(a.nome)}</span></h2>
-      <div class="sub">${a.erro || a.lendo ? "" : `${a.img ? a.raw.length : a.itens.length} lançamento${(a.img ? a.raw.length : a.itens.length) === 1 ? "" : "s"} lido${(a.img ? a.raw.length : a.itens.length) === 1 ? "" : "s"}${a.img ? " no print" : ""}${a.ignorados ? `, ${a.ignorados} linhas sem data ou valor ignoradas` : ""}${a.colunas ? ` · colunas: ${esc(a.colunas.data)}, ${esc(a.colunas.descricao)}, ${esc(a.colunas.valor)}` : ""}`}</div></div>
+      <div class="sub">${a.erro || a.lendo ? "" : `${a.img ? a.raw.length : a.itens.length} lançamento${(a.img ? a.raw.length : a.itens.length) === 1 ? "" : "s"} lido${(a.img ? a.raw.length : a.itens.length) === 1 ? "" : "s"}${a.img ? (a.pdf ? " no PDF" : " no print") : ""}${a.ignorados ? `, ${a.ignorados} linhas sem data ou valor ignoradas` : ""}${a.colunas ? ` · colunas: ${esc(a.colunas.data)}, ${esc(a.colunas.descricao)}, ${esc(a.colunas.valor)}` : ""}`}</div></div>
       ${a.erro || a.lendo ? "" : `<div class="imp-dest">${a.destino ? `<label>Destino <select data-impfile-dest="${fi}">${opts(destOpts, a.destino)}</select></label>` : ""}${card ? `<label>Esta é a <select data-impfile-fat="${fi}">${opts(fats, a.fatura)}</select></label>` : ""}<button class="mini ${a.destino ? "" : "primary"}" data-act="impcartoes" data-arg="${fi}" aria-expanded="${!!a.escolher}">${a.destino ? "Trocar cartão ou conta" : "Escolher cartão ou conta"}</button></div>`}</div>
-    ${a.lendo ? `<div class="ocr-prog pad-x"><div><b>Lendo o print…</b> <span class="sub" id="ocr-p-${fi}">${a.etapa || "preparando"}</span></div><div class="bar"><i id="ocr-b-${fi}" style="width:${Math.round((a.progresso || 0) * 100)}%"></i></div><span class="sub">Na primeira vez o leitor é baixado (alguns segundos). Depois fica guardado no aparelho.</span></div>` : ""}
-    ${a.img && !a.lendo ? `<div class="pad-x imp-img"><span class="sub">${a.banco ? `Banco reconhecido no print: <b>${esc(a.banco)}</b>${a.ehCartao ? " · parece fatura de cartão" : ""}` : "Não reconheci o banco no print."}</span> <button class="linkbtn" data-act="impverprint" data-arg="${fi}">${a.verPrint ? "Esconder print" : "Ver print ao lado"}</button></div>` : ""}
-    ${!a.erro && !a.lendo && (a.escolher || !a.destino) ? `<div class="pad-x vinc">${a.destino ? "" : `<div class="check bad"><b>Não identifiquei o banco ou o cartão${a.img ? " neste print" : ""}.</b> Escolha abaixo onde lançar estes itens.</div>`}
+    ${a.senha ? `<div class="pad-x pdf-senha"><input type="password" id="pdfsenha-${fi}" placeholder="Senha do PDF" autocomplete="off" aria-label="Senha do PDF"><button class="mini primary" data-act="impsenha" data-arg="${fi}">Abrir PDF</button><span class="sub">Bancos costumam usar os primeiros dígitos do CPF do titular. A senha não é guardada.</span></div>` : ""}
+    ${a.lendo ? `<div class="ocr-prog pad-x"><div><b>${a.pdf ? "Lendo o PDF…" : "Lendo o print…"}</b> <span class="sub" id="ocr-p-${fi}">${a.etapa || "preparando"}</span></div><div class="bar"><i id="ocr-b-${fi}" style="width:${Math.round((a.progresso || 0) * 100)}%"></i></div><span class="sub">Na primeira vez o leitor é baixado (alguns segundos). Depois fica guardado no aparelho.</span></div>` : ""}
+    ${a.img && !a.lendo ? `<div class="pad-x imp-img"><span class="sub">${a.banco ? `Banco reconhecido ${a.pdf ? "no PDF" : "no print"}: <b>${esc(a.banco)}</b>${a.ehCartao ? " · parece fatura de cartão" : ""}` : (a.pdf ? "Não reconheci o banco no PDF." : "Não reconheci o banco no print.")}${a.nota ? ` · ${esc(a.nota)}` : ""}</span> ${a.pdf ? `<a class="linkbtn" href="${a.preview}" target="_blank" rel="noopener">Abrir o PDF</a>` : `<button class="linkbtn" data-act="impverprint" data-arg="${fi}">${a.verPrint ? "Esconder print" : "Ver print ao lado"}</button>`}</div>` : ""}
+    ${!a.erro && !a.lendo && (a.escolher || !a.destino) ? `<div class="pad-x vinc">${a.destino ? "" : `<div class="check bad"><b>Não identifiquei o banco ou o cartão${a.img ? (a.pdf ? " neste PDF" : " neste print") : ""}.</b> Escolha abaixo onde lançar estes itens.</div>`}
       ${S.cartoes.length ? `<div class="vinc-t">Cartões</div><div class="vinc-l">${S.cartoes.map(c => `<button class="vinc-c ${a.destino === c.id ? "on" : ""}" data-act="impvincular" data-arg="${fi}|${c.id}">${icon("cartoes")}<span><b>${esc(c.nome)}</b><span class="sub">${esc(c.inst || "")}${c.final ? " · final " + esc(c.final) : ""} · fecha ${pad(c.fecha)}, vence ${pad(c.vence)}</span></span></button>`).join("")}</div>` : `<p class="sub">Nenhum cartão cadastrado. <button class="linkbtn" data-go="ajustes" data-aj="cartoes">Cadastrar cartão</button></p>`}
       ${S.contas.length ? `<div class="vinc-t">Contas</div><div class="vinc-l">${S.contas.map(c => `<button class="vinc-c ${a.destino === c.id ? "on" : ""}" data-act="impvincular" data-arg="${fi}|${c.id}">${icon("contas")}<span><b>${esc(c.nome)}</b><span class="sub">${esc(c.inst || c.tipo || "")}</span></span></button>`).join("")}</div>` : ""}</div>` : ""}
     ${a.repetido ? `<div class="check bad pad-x">Este arquivo já foi importado em ${tsBr(a.repetido.data)} (lote ${esc(a.repetido.id)}). Os itens já registrados aparecem como duplicatas ou vinculados.</div>` : ""}
-    ${a.erro ? `<div class="check bad pad-x">${esc(a.erro)}</div>` : a.lendo || !a.destino ? "" : `${a.aviso ? `<div class="check bad pad-x">${esc(a.aviso)}</div>` : ""}${a.img ? `<div class="check info pad-x">Confira cada linha com o print: data, descrição e valor podem ser corrigidos aqui mesmo. ${card ? "Compra é valor positivo; estorno ou pagamento, negativo (com −)." : "Saída é valor negativo (com −); entrada, positivo."}</div>` : ""}
-    <div class="${a.img && a.verPrint ? "imp-lado" : ""}">${a.img && a.verPrint ? `<a href="${a.preview}" target="_blank" rel="noopener" class="imp-thumb"><img src="${a.preview}" alt="Print enviado"></a>` : ""}<div class="tbl-wrap"><table class="rows imp"><thead><tr><th>${a.img ? "Data da compra" : "Data"}</th><th>Descrição lida</th>${a.img ? "<th>Parcela</th>" : ""}<th>Categoria</th><th class="r">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
+    ${a.erro ? `<div class="check bad pad-x">${esc(a.erro)}</div>` : a.lendo || !a.destino ? "" : `${a.aviso ? `<div class="check bad pad-x">${esc(a.aviso)}</div>` : ""}${a.img ? `<div class="check info pad-x">Confira cada linha com ${a.pdf ? "o PDF" : "o print"}: data, descrição e valor podem ser corrigidos aqui mesmo. ${card ? "Compra é valor positivo; estorno ou pagamento, negativo (com −)." : "Saída é valor negativo (com −); entrada, positivo."}</div>` : ""}
+    <div class="${a.img && !a.pdf && a.verPrint ? "imp-lado" : ""}">${a.img && !a.pdf && a.verPrint ? `<a href="${a.preview}" target="_blank" rel="noopener" class="imp-thumb"><img src="${a.preview}" alt="Print enviado"></a>` : ""}<div class="tbl-wrap"><table class="rows imp"><thead><tr><th>${a.img ? "Data da compra" : "Data"}</th><th>Descrição lida</th>${a.img ? "<th>Parcela</th>" : ""}<th>Categoria</th><th class="r">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
     ${a.itens.map((it, i) => { const [pc, pl] = IMP_ST[it.st] || ["p-mute", it.st]; const ed = IMP_GRAVA.includes(it.st) || IMP_PEND.includes(it.st); const k = fi + ":" + i;
       const cats = it.tipo === "receita" ? catsRec() : catsDesp();
       const r = a.raw[i] || {};
       return `<tr class="${it.st === "parc" ? "flag" : it.st === "dup" ? "dup" : it.st === "skip" ? "skip" : ""}">
       ${a.img ? `<td><input type="date" class="imp-ed ${r.d ? "" : "falta"}" data-impimg="${k}:d" value="${esc(r.d || "")}" aria-label="Data da compra">${r.d ? "" : '<div class="sub neg">Preencha a data</div>'}</td><td><input class="imp-ed wide ${r.desc ? "" : "falta"}" data-impimg="${k}:desc" value="${esc(r.desc || "")}" placeholder="Descrição" aria-label="Descrição">${it.note ? `<div class="sub">${esc(it.note)}</div>` : ""}</td>
-      <td><input class="imp-ed parc" data-impimg="${k}:parc" value="${r.parc ? pad(r.parc.k) + "/" + pad(r.parc.n) : ""}" placeholder="à vista" inputmode="numeric" aria-label="Parcela (ex.: 07/08)">${r.fat ? `<div class="sub">fatura ${ymLabel(r.fat)}</div>` : ""}</td>`
+      <td><input class="imp-ed parc" data-impimg="${k}:parc" value="${r.parc ? pad(r.parc.k) + "/" + pad(r.parc.n) : ""}" placeholder="à vista" title="Parcela atual / total. Ex.: 01/02, 1 de 2 ou 1/2. Em branco = à vista." aria-label="Parcela (ex.: 01/02)">${r.fat ? `<div class="sub">fatura ${ymLabel(r.fat)}</div>` : r.parc ? "" : `<div class="sub">ex.: 01/02</div>`}</td>`
         : `<td class="num">${brs(it.d)}</td><td><b>${esc(it.desc)}</b>${it.note ? `<div class="sub">${esc(it.note)}</div>` : ""}</td>`}
       <td>${ed && it.tipo !== "transferencia" ? `<select data-imp-cat="${k}" aria-label="Categoria">${opts(cats, it.cat)}</select>` : `<span class="sub">${esc(it.cat || "—")}</span>`}</td>
       <td class="r num ${it.tipo === "receita" || it.tipo === "estorno" ? "pos" : ""}">${a.img ? `<input class="imp-ed num r ${r.vs ? "" : "falta"}" inputmode="decimal" data-impimg="${k}:vs" value="${r.vs ? (r.vs < 0 ? "-" : "") + (Math.abs(r.vs) / 100).toFixed(2).replace(".", ",") : ""}" placeholder="0,00" aria-label="Valor">${it.st === "parc" || it.st === "parcok" ? `<div class="sub">${it.n} × ${fmt(it.v)}</div>` : ""}` : it.st === "parc" || it.st === "parcok" ? `${it.n} × ${fmt(it.v)}` : (it.tipo === "receita" || it.tipo === "estorno" ? "+ " : "") + fmt(it.v)}</td>
@@ -415,13 +416,25 @@ function adivinhaDestino(nome, lido) {
   const c = S.contas.find(k => k.caixa && (n.includes(norm(k.inst)) || n.includes(norm(k.nome)))) || S.contas.find(k => k.caixa) || S.contas[0] || S.cartoes[0];
   return c ? c.id : null;
 }
-function adivinhaFatura(card, itens) {
-  const fs = itens.map(i => i.fat).filter(Boolean); if (fs.length) { const c = {}; fs.forEach(f => c[f] = (c[f] || 0) + 1); return Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]; }
+function adivinhaFatura(card, itens, vencDoc) {
+  const fs = itens.map(i => i.fat).filter(Boolean); if (!fs.length && vencDoc) return ymOf(vencDoc); if (fs.length) { const c = {}; fs.forEach(f => c[f] = (c[f] || 0) + 1); return Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]; }
   const cont = {}; itens.filter(i => i.vs > 0 && i.d && !i.parc && !achaParcela(i.desc)).forEach(i => { const k = keyOf(card, i.d); cont[k] = (cont[k] || 0) + 1; });
   const best = Object.entries(cont).sort((a, b) => b[1] - a[1])[0];
   return best ? best[0] : keyOf(card, TODAY);
 }
-function reanalisa(a) { a.itens = analisar(S, a.raw, a.destino, a.fatura); if (a.img) a.itens.forEach((it, i) => { if (it.st === "parc" && a.raw[i] && a.raw[i].parc) it.st = "parcok"; }); }
+// reanalisa um arquivo (depois de mudar data, valor, parcela, destino ou fatura) sem perder o que a pessoa já escolheu à mão
+function reanalisa(a) {
+  a.itens = analisar(S, a.raw, a.destino, a.fatura);
+  a.itens.forEach((it, i) => {
+    const r = a.raw[i]; if (!r) return;
+    if (a.img && it.st === "parc" && r.parc) it.st = "parcok";
+    if (r.catUser && it.tipo !== "transferencia") { it.cat = r.catUser; it.sub = ""; }
+    const u = r.stUser; if (!u || it.st === "link") return;
+    if (u === "skip") { it.orig = it.st; it.st = "skip"; }
+    else if ((u === "avista" || u === "parcok") && it.n) it.st = u;
+    else if ((u === "keep" || u === "ok") && ["dup", "comp"].includes(it.st)) { if (it.st === "comp") { it.comp = null; it.note = ""; } it.st = u; }
+  });
+}
 const ehImagem = f => /^image\//.test(f.type || "") || /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name || "");
 // reconhecimento de texto no próprio navegador (Tesseract, português). Baixado só quando o primeiro print chega.
 const OCR = Object.assign({ lib: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js", workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js", corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1", langPath: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/por@1.0.0/4.0.0_best_int" }, window.CAIXA_OCR || {});
@@ -446,33 +459,101 @@ async function lerImagem(blob, aviso) {
   const { data } = await ocrWorker.recognize(cv);
   return data.text || "";
 }
-function destinoDoPrint(lido) {
+function destinoDoPrint(lido, texto) {
+  // cartão pelo final do número escrito no documento ("Final 1234", "**** 1234")
+  const T = norm(texto || "");
+  const porFinal = S.cartoes.filter(k => soDigitos(k.final).length >= 3 && new RegExp("(FINAL|\\*{2,}|X{4})\\s*" + soDigitos(k.final) + "\\b").test(T));
+  if (porFinal.length === 1) return porFinal[0].id;
   const b = norm(lido.banco || ""), achou = k => b && (norm(k.inst || "").includes(b) || b.includes(norm(k.inst || "x")) || norm(k.nome).includes(b));
   const cards = S.cartoes.filter(achou), contas = S.contas.filter(achou);
   if (lido.cartao && cards.length === 1) return cards[0].id;
   if (!lido.cartao && contas.length === 1 && !cards.length) return contas[0].id;
   if (cards.length === 1 && !contas.length) return cards[0].id;
+  // nome do cartão ou da loja escrito no documento ("Fatura do cartão Casas Bahia")
+  if (lido.cartao) { const porNome = S.cartoes.filter(k => [k.inst, k.nome.split(/\s[-–]\s/)[0]].some(x => x && norm(x).length >= 4 && new RegExp("(CARTAO|FATURA)[^\\n]{0,40}" + norm(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(T))); if (porNome.length === 1) return porNome[0].id; }
   return null; // não deu para ter certeza: a pessoa escolhe
+}
+// texto lido (do print ou do PDF) → linhas editáveis
+function processaTexto(a, texto) {
+  const lido = lerTextoImagem(texto, TODAY), onde = a.pdf ? "PDF" : "print";
+  Object.assign(a, { lendo: false, texto, banco: lido.banco, ehCartao: lido.cartao, raw: lido.itens, ignorados: lido.ignorados, vencDoc: lido.vencimento });
+  if (!lido.itens.length) a.aviso = `Não encontrei lançamentos neste ${onde}. Confira se os valores aparecem com vírgula (ex.: 120,00) e as datas estão visíveis, ou adicione as linhas à mão abaixo.`;
+  a.destino = destinoDoPrint(lido, texto); a.escolher = !a.destino;
+  if (a.destino) { const c = cardOf(S, a.destino); a.fatura = c ? adivinhaFatura(c, a.raw, a.vencDoc) : null; reanalisa(a); }
+  render(); toast(lido.itens.length ? `${lido.itens.length} lançamento${lido.itens.length > 1 ? "s" : ""} lido${lido.itens.length > 1 ? "s" : ""} no ${onde}. Confira antes de gravar.` : `Não encontrei lançamentos no ${onde}.`);
+}
+const avisoLeitura = a => (p, etapa) => { a.progresso = p; a.etapa = etapa; const fi = S.pend ? S.pend.arquivos.indexOf(a) : -1; const b = document.getElementById("ocr-b-" + fi), t = document.getElementById("ocr-p-" + fi); if (b) b.style.width = Math.round(p * 100) + "%"; if (t) t.textContent = etapa + (p > 0.03 ? " · " + Math.round(p * 100) + "%" : ""); };
+// ---------- PDF: texto extraído no próprio aparelho (pdf.js); página escaneada é lida como imagem ----------
+const PDFJS = Object.assign({ lib: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js", worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js" }, window.CAIXA_PDF || {});
+function carregaPdfjs() {
+  if (window.pdfjsLib) return Promise.resolve();
+  return new Promise((ok, erro) => { const el = document.createElement("script"); el.src = PDFJS.lib; el.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS.worker; ok(); }; el.onerror = () => erro(new Error("Não consegui baixar o leitor de PDF. Confira a internet e tente de novo.")); document.head.appendChild(el); });
+}
+// junta os pedaços de texto de uma página em linhas (mesma altura), da esquerda para a direita
+function linhasDoPdf(items) {
+  const its = items.filter(i => i.str && i.str.trim()).map(i => ({ s: i.str, x: i.transform[4], y: i.transform[5], w: i.width || 0, h: Math.abs(i.transform[3]) || Math.abs(i.transform[0]) || 8 }));
+  its.sort((a, b) => b.y - a.y || a.x - b.x);
+  const linhas = [];
+  for (const it of its) { const l = linhas.length && Math.abs(linhas[linhas.length - 1].y - it.y) <= Math.max(2, it.h * 0.4) ? linhas[linhas.length - 1] : null; if (l) l.its.push(it); else linhas.push({ y: it.y, its: [it] }); }
+  const out = [];
+  for (const l of linhas) {
+    l.its.sort((a, b) => a.x - b.x);
+    let txt = "", fim = null;
+    for (const it of l.its) {
+      const gap = fim === null ? 0 : it.x - fim;
+      // duas colunas lado a lado: um lançamento novo começa com data depois de um valor
+      if (fim !== null && gap > Math.max(30, it.h * 4) && /^\s*\d{1,2}\/\d{1,2}/.test(it.s) && /\d,\d{2}\s*$/.test(txt)) { out.push(txt); txt = ""; }
+      else if (fim !== null && gap > it.h * 0.15 && !/\s$/.test(txt) && !/^\s/.test(it.s)) txt += " ";
+      txt += it.s; fim = it.x + it.w;
+    }
+    out.push(txt);
+  }
+  return out.join("\n");
+}
+async function lerPDF(a, f, senha) {
+  const atual = () => S.pend && S.pend.arquivos.includes(a), aviso = avisoLeitura(a);
+  try {
+    aviso(0.02, "abrindo o PDF");
+    await carregaPdfjs();
+    const dados = new Uint8Array(await lerBuffer(f));
+    let doc;
+    try { doc = await window.pdfjsLib.getDocument({ data: dados, password: senha || undefined, isEvalSupported: false }).promise; }
+    catch (e) { if (e && e.name === "PasswordException") { if (!atual()) return; Object.assign(a, { lendo: false, senha: true, erro: senha ? "Senha incorreta. Tente de novo." : "Este PDF está protegido por senha. Digite a senha abaixo para abrir." }); render(); const i = document.getElementById("pdfsenha-" + S.pend.arquivos.indexOf(a)); if (i) i.focus(); return; } throw e; }
+    a.senha = false;
+    let texto = "", escaneadas = 0;
+    for (let n = 1; n <= doc.numPages; n++) {
+      if (!atual()) return;
+      aviso((n - 1) / doc.numPages, `página ${n} de ${doc.numPages}`);
+      const pg = await doc.getPage(n), tc = await pg.getTextContent();
+      let t = linhasDoPdf(tc.items);
+      if ((t.match(/[A-Za-zÀ-ú]/g) || []).length < 20) { // página sem texto (escaneada/foto): lê como imagem
+        escaneadas++;
+        const vp = pg.getViewport({ scale: 2 }), cv = document.createElement("canvas"); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+        await pg.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+        t = await lerImagem(cv, (p, e) => aviso((n - 1 + p) / doc.numPages, `página ${n} de ${doc.numPages}: ${e}`));
+      }
+      texto += t + "\n";
+    }
+    if (!atual()) return;
+    a.nota = escaneadas ? `${escaneadas === doc.numPages ? "PDF escaneado" : escaneadas + " página(s) escaneada(s)"}: lido como imagem, confira com atenção` : `${doc.numPages} página${doc.numPages > 1 ? "s" : ""}`;
+    processaTexto(a, texto);
+  } catch (e) { console.error(e); if (!atual()) return; Object.assign(a, { lendo: false, erro: "Não foi possível ler este PDF: " + (e.message || e) + ". Se o banco permitir, tente exportar em CSV ou OFX, ou cole um print." }); render(); }
 }
 async function lerPrint(a, f) {
   const atual = () => S.pend && S.pend.arquivos.includes(a);
   try {
-    const texto = await lerImagem(f, (p, etapa) => { a.progresso = p; a.etapa = etapa; const fi = S.pend ? S.pend.arquivos.indexOf(a) : -1; const b = document.getElementById("ocr-b-" + fi), t = document.getElementById("ocr-p-" + fi); if (b) b.style.width = Math.round(p * 100) + "%"; if (t) t.textContent = etapa + (p > 0.03 ? " · " + Math.round(p * 100) + "%" : ""); });
+    const texto = await lerImagem(f, avisoLeitura(a));
     if (!atual()) return;
-    const lido = lerTextoImagem(texto, TODAY);
-    Object.assign(a, { lendo: false, texto, banco: lido.banco, ehCartao: lido.cartao, raw: lido.itens, ignorados: lido.ignorados });
-    if (!lido.itens.length) a.aviso = "Não encontrei lançamentos neste print. Confira se os valores aparecem com vírgula (ex.: 120,00) e as datas estão visíveis, ou adicione as linhas à mão abaixo.";
-    a.destino = destinoDoPrint(lido); a.escolher = !a.destino;
-    if (a.destino) { const c = cardOf(S, a.destino); a.fatura = c ? adivinhaFatura(c, a.raw) : null; reanalisa(a); }
-    render(); toast(lido.itens.length ? `${lido.itens.length} lançamento${lido.itens.length > 1 ? "s" : ""} lido${lido.itens.length > 1 ? "s" : ""} no print. Confira antes de gravar.` : "Não encontrei lançamentos no print.");
+    processaTexto(a, texto);
   } catch (e) { console.error(e); if (!atual()) return; Object.assign(a, { lendo: false, erro: e.message || "Não foi possível ler o print." }); render(); }
 }
 async function lerArquivos(files) {
   const lista = [], prints = [];
   for (const f of files) {
-    if (ehImagem(f)) {
+    const ehPdf = /\.pdf$/i.test(f.name || "") || f.type === "application/pdf";
+    if (ehImagem(f) || ehPdf) {
       const buf = await lerBuffer(f), hash = await sha256(buf);
-      const a = { nome: f.name, hash, formato: "PRINT", img: true, lendo: true, progresso: 0, raw: [], itens: [], ignorados: 0, colunas: null, preview: URL.createObjectURL(f) };
+      const a = { nome: f.name, hash, formato: ehPdf ? "PDF" : "PRINT", img: true, pdf: ehPdf, arquivo: ehPdf ? f : null, lendo: true, progresso: 0, raw: [], itens: [], ignorados: 0, colunas: null, preview: URL.createObjectURL(f) };
       a.repetido = hash ? S.importacoes.find(h => (h.hashes || []).includes(hash)) : null;
       lista.push(a); prints.push([a, f]); continue;
     }
@@ -480,13 +561,13 @@ async function lerArquivos(files) {
     const lido = ["pdf", "jpg", "jpeg", "png"].includes(ext) ? lerArquivo(f.name, "") : lerArquivo(f.name, decodifica(buf));
     const a = { nome: f.name, hash, formato: lido.formato, erro: lido.erro || (!lido.itens.length ? "Nenhum lançamento encontrado neste arquivo." : null), raw: lido.itens || [], ignorados: lido.ignorados || 0, colunas: lido.colunas || null, itens: [] };
     a.repetido = hash ? S.importacoes.find(h => (h.hashes || []).includes(hash)) : null;
-    if (!a.erro) { a.destino = adivinhaDestino(f.name, lido); const c = cardOf(S, a.destino); a.fatura = c ? adivinhaFatura(c, a.raw) : null; reanalisa(a); }
+    if (!a.erro) { a.destino = adivinhaDestino(f.name, lido); const c = cardOf(S, a.destino); a.fatura = c ? adivinhaFatura(c, a.raw, a.vencDoc) : null; reanalisa(a); }
     lista.push(a);
   }
   if (!S.pend) S.pend = { arquivos: [] };
   S.pend.arquivos.push(...lista); ui.impDone = null; render();
   const ok = lista.filter(a => !a.erro && !a.img).length; if (ok || !prints.length) toast(ok ? `${ok} arquivo${ok > 1 ? "s" : ""} lido${ok > 1 ? "s" : ""}. Revise antes de gravar.` : "Nenhum arquivo pôde ser lido.");
-  for (const [a, f] of prints) await lerPrint(a, f);
+  for (const [a, f] of prints) await (a.pdf ? lerPDF(a, f) : lerPrint(a, f));
 }
 function gravarImportacao() {
   const P = S.pend; let incl = 0, vinc = 0, ign = 0;
@@ -1060,7 +1141,8 @@ Object.assign(acts, {
     closeLayer(); commit(`Importação ${id} desfeita: ${nl} lançamento${nl === 1 ? "" : "s"}${np ? ` e ${np} parcelamento${np === 1 ? "" : "s"}` : ""} removido${nl + np === 1 ? "" : "s"}.`);
   },
   impcartoes: fi => { const a = S.pend.arquivos[+fi]; a.escolher = !a.escolher || !a.destino; render(); },
-  impvincular: arg => { const [fi, id] = arg.split("|"), a = S.pend.arquivos[+fi]; a.destino = id; a.escolher = false; const c = cardOf(S, id); a.fatura = c ? adivinhaFatura(c, a.raw) : null; reanalisa(a); render(); toast("Vinculado a " + nomeDe(id) + (c ? ", fatura de " + ymLong(a.fatura) + ". Confira a fatura acima." : ".")); },
+  impvincular: arg => { const [fi, id] = arg.split("|"), a = S.pend.arquivos[+fi]; a.destino = id; a.escolher = false; const c = cardOf(S, id); a.fatura = c ? adivinhaFatura(c, a.raw, a.vencDoc) : null; reanalisa(a); render(); toast("Vinculado a " + nomeDe(id) + (c ? ", fatura de " + ymLong(a.fatura) + ". Confira a fatura acima." : ".")); },
+  impsenha: fi => { const a = S.pend.arquivos[+fi], i = document.getElementById("pdfsenha-" + fi), senha = i ? i.value : ""; if (!senha) return toast("Digite a senha do PDF."); Object.assign(a, { erro: null, lendo: true, progresso: 0 }); render(); lerPDF(a, a.arquivo, senha); },
   impverprint: fi => { const a = S.pend.arquivos[+fi]; a.verPrint = !a.verPrint; render(); },
   impremover: k => { const [fi, i] = k.split(":").map(Number), a = S.pend.arquivos[fi]; a.raw.splice(i, 1); reanalisa(a); render(); },
   impadd: fi => { const a = S.pend.arquivos[+fi]; a.raw.push({ d: a.raw.length ? a.raw[a.raw.length - 1].d : TODAY, desc: "", vs: 0, fitid: null }); reanalisa(a); render(); const ins = document.querySelectorAll(`[data-impimg^="${fi}:${a.raw.length - 1}:desc"]`); if (ins[0]) ins[0].focus(); },
@@ -1116,7 +1198,7 @@ document.addEventListener("click", e => {
   if (!el) { if (ui.userMenu && !e.target.closest(".user")) { ui.userMenu = false; render(); } return; }
   const d = el.dataset;
   if ("close" in d) { closeLayer(); return; }
-  if (d.imp !== undefined) { const [fi, i] = d.imp.split(":").map(Number), it = S.pend.arquivos[fi].itens[i]; if (d.to === "skip" && it.st !== "skip") it.orig = it.st; if (d.to === "ok" && it.st === "comp") { it.comp = null; it.note = ""; } it.st = d.to; render(); return; }
+  if (d.imp !== undefined) { const [fi, i] = d.imp.split(":").map(Number), it = S.pend.arquivos[fi].itens[i], rr = S.pend.arquivos[fi].raw[i]; if (rr) rr.stUser = it.st === "skip" && d.to !== "skip" ? null : d.to; if (d.to === "skip" && it.st !== "skip") it.orig = it.st; if (d.to === "ok" && it.st === "comp") { it.comp = null; it.note = ""; } it.st = d.to; render(); return; }
   if (d.go) { if (d.card) { ui.card = d.card; ui.cardKey = d.key || null; } if (d.aj) ui.aj = d.aj; go(d.go); return; }
   if (d.card) { ui.card = d.card; ui.cardKey = null; render(); return; }
   if (d.calc) { calcDrawer(d.calc); return; }
@@ -1126,6 +1208,7 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") { closeLayer(); if (ui.more || ui.userMenu) { ui.more = ui.userMenu = false; render(); } }
   if (e.key === "Enter" && e.target.matches("tr[data-open],tr[data-act]")) e.target.click();
+  if (e.key === "Enter" && e.target.id && e.target.id.startsWith("pdfsenha-")) acts.impsenha(e.target.id.slice(9));
   if (e.key === "Enter" && e.target.id === "busca") { ui.lf.q = e.target.value.trim(); go("lancamentos"); setTimeout(() => { const b = document.getElementById("busca"); if (b) { b.focus(); b.setSelectionRange(b.value.length, b.value.length); } }, 0); }
 });
 document.addEventListener("submit", async e => {
@@ -1150,12 +1233,12 @@ document.addEventListener("change", e => {
   else if (t.dataset.impimg !== undefined) {
     const [fi, i, campo] = t.dataset.impimg.split(":"), a = S.pend.arquivos[+fi], r = a.raw[+i]; if (!r) return;
     if (campo === "d") r.d = t.value || ""; else if (campo === "desc") r.desc = t.value.trim();
-    else if (campo === "parc") { const m = t.value.match(/(\d{1,2})\s*(?:\/|de)\s*(\d{1,2})/i); r.parc = m && +m[1] >= 1 && +m[2] >= 2 && +m[2] <= 48 && +m[1] <= +m[2] ? { k: +m[1], n: +m[2] } : null; if (t.value.trim() && !r.parc) toast("Parcela no formato 07/08 (parcela atual / total, até 48)."); }
+    else if (campo === "parc") { r.parc = lerParcela(t.value); r.stUser = null; if (t.value.trim() && !r.parc) toast("Não entendi a parcela. Escreva a parcela atual e o total, por exemplo 01/02 ou 1 de 2 (até 48). Deixe em branco se for à vista."); }
     else { const v = parseValor(t.value); r.vs = isNaN(v) ? 0 : v; }
     reanalisa(a); render();
   }
-  else if (t.dataset.impCat !== undefined) { const [fi, i] = t.dataset.impCat.split(":").map(Number); S.pend.arquivos[fi].itens[i].cat = t.value; }
-  else if (t.dataset.impfileDest !== undefined) { const a = S.pend.arquivos[+t.dataset.impfileDest]; a.destino = t.value; const c = cardOf(S, a.destino); a.fatura = c ? adivinhaFatura(c, a.raw) : null; reanalisa(a); render(); }
+  else if (t.dataset.impCat !== undefined) { const [fi, i] = t.dataset.impCat.split(":").map(Number), a = S.pend.arquivos[fi]; a.itens[i].cat = t.value; if (a.raw[i]) a.raw[i].catUser = t.value; }
+  else if (t.dataset.impfileDest !== undefined) { const a = S.pend.arquivos[+t.dataset.impfileDest]; a.destino = t.value; const c = cardOf(S, a.destino); a.fatura = c ? adivinhaFatura(c, a.raw, a.vencDoc) : null; reanalisa(a); render(); }
   else if (t.dataset.impfileFat !== undefined) { const a = S.pend.arquivos[+t.dataset.impfileFat]; a.fatura = t.value; if (a.img) a.raw.forEach(r => r.fat = t.value); reanalisa(a); render(); }
   else if (t.id === "arquivos" && t.files.length) { lerArquivos([...t.files]); t.value = ""; }
   else if (t.form && t.form.id === "fnovo") { if (t.name === "cat") t.dataset.touched = "1"; novoHint(); }

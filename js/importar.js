@@ -93,6 +93,14 @@ const VALOR_IMG = /([+\-−–—](?=R|\d))?(?:R\s?\$\s*)?([+\-−–—](?=\d))
 const DATA_IMG = /(?<![\d\/])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d\/])/g;
 // parcela "07/08", "Parcela 2 de 10", "Parc 3/12" (sem ano: não é data)
 const PARC_IMG = /(?:\bPARCELA\s*|\bPARC\.?\s*)?(?<![\d\/])(\d{1,2})\s*(?:\/|\bDE\b)\s*(\d{1,2})(?![\d\/])/g;
+// parcela escrita de vários jeitos: "07/08", "7 de 8", "07-08", "7x8", "parcela 7 de 8", "parc. 07/08"
+function lerParcela(t) {
+  const m = norm(String(t || "")).match(/(?:PARCELA|PARC\.?)?\s*(\d{1,2})\s*(?:\/|\bDE\b|-|X|\s)\s*(\d{1,2})\b/);
+  if (!m) return null; const k = +m[1], n = +m[2];
+  return k >= 1 && n >= 2 && n <= 48 && k <= n ? { k, n } : null;
+}
+// "Parcela 1 de 2", "Parc 01/02" com a palavra parcela (vale em qualquer lugar da linha)
+const PARC_PALAVRA = /\b(?:PARCELA|PARC\.?)\s*(\d{1,2})\s*(?:\/|DE)\s*(\d{1,2})\b/;
 const isoDe = (d, m, y, hoje) => y ? `${y.length === 2 ? "20" + y : y}-${pad(+m)}-${pad(+d)}` : anoProvavel(+m, +d, hoje);
 const dataValida = (d, m) => +d >= 1 && +d <= 31 && +m >= 1 && +m <= 12;
 function limpaDesc(t) {
@@ -114,7 +122,7 @@ function lerTextoImagem(texto, hoje = TODAY) {
     const valores = [...L.matchAll(VALOR_IMG)];
     if (!valores.length) {
       // "Parcela 2/10" na linha de baixo do valor: pertence à compra anterior
-      const pm = L.trim().match(/^(?:PARCELA|PARC\.?)\s*(\d{1,2})\s*(?:\/|DE)\s*(\d{1,2})$/);
+      const pm = L.trim().match(/^(?:PARCELA|PARC\.?)?\s*(\d{1,2})\s*(?:\/|DE)\s*(\d{1,2})(?:\s*PARCELAS?)?$/);
       if (!dt && pm && itens.length && ultimaLinhaItem && !itens[itens.length - 1].parc && +pm[1] >= 1 && +pm[1] <= +pm[2] && +pm[2] >= 2) { itens[itens.length - 1].parc = { k: +pm[1], n: +pm[2] }; ultimaLinhaItem = false; continue; }
       ultimaLinhaItem = false;
       if (dt && !L.replace(/[^A-Z]/g, "")) { dataAtual = dt.iso; descPend = ""; continue; } // cabeçalho de dia ("20 OUT")
@@ -124,14 +132,25 @@ function lerTextoImagem(texto, hoje = TODAY) {
       continue;
     }
     if (RESUMO_IMG.test(L) && !/[A-Z]{3,}.*\d{1,2}\/\d{1,2}/.test(L.replace(RESUMO_IMG, ""))) { descPend = ""; ignorados++; continue; }
+    { const pw = L.match(PARC_PALAVRA), ult = itens[itens.length - 1];
+      if (pw && !dt && ult && ultimaLinhaItem && !ult.parc && !/[A-Z]{4,}/.test(L.replace(PARC_PALAVRA, "").replace(/\b(DE|EM|R)\b/g, "")) && +pw[1] >= 1 && +pw[2] >= 2 && +pw[1] <= +pw[2]) { ult.parc = { k: +pw[1], n: +pw[2] }; ultimaLinhaItem = false; continue; } }
     const vm = valores[valores.length - 1];
     const v = parseValor(vm[3]); if (!(v > 0)) { ignorados++; continue; }
     const antes = L.slice(0, vm.index), depois = L.slice(vm.index + vm[0].length);
     const sinal = vm[1] || vm[2] || ""; // só vale sinal colado no valor ("−R$ 800,00", "-150,00"); "— R$" é borda de tabela
     const neg = /[\-−–—]/.test(sinal) || /\b(ESTORNO|CREDITO|PAGAMENTO RECEBIDO|DEVOLUCAO)\b/.test(L);
     // vencimento: data depois do valor (coluna "Vencimento") → fatura daquele mês
-    let venc = null;
-    for (const m of depois.matchAll(DATA_IMG)) if (dataValida(m[1], m[2])) { venc = isoDe(m[1], m[2], m[3], hoje); break; }
+    let venc = null, parcDepois = null;
+    const pwd = depois.match(PARC_PALAVRA); if (pwd && +pwd[1] >= 1 && +pwd[2] >= 2 && +pwd[1] <= +pwd[2]) parcDepois = { k: +pwd[1], n: +pwd[2] };
+    for (const m of depois.matchAll(DATA_IMG)) {
+      if (pwd && m.index >= pwd.index && m.index < pwd.index + pwd[0].length) continue;
+      const pk = !m[3] && +m[1] >= 1 && +m[2] >= 2 && +m[2] <= 48 && +m[1] <= +m[2] ? { k: +m[1], n: +m[2] } : null;
+      if (dataValida(m[1], m[2])) {
+        const iso = isoDe(m[1], m[2], m[3], hoje), ref = (dt && dt.iso) || hoje, dif = (Date.parse(iso) - Date.parse(ref)) / 864e5;
+        if (m[3] || !pk || (dif >= -5 && dif <= 75)) { if (!venc) venc = iso; continue; } // perto da compra: é o vencimento
+      }
+      if (pk && !parcDepois) parcDepois = pk; // "1/2" depois do valor que não pode ser vencimento: é a parcela
+    }
     // compra: data no começo da linha; se não houver, uma data com ano antes da descrição
     let d = dt ? dt.iso : null;
     let antesB = B.slice(ini, ini + vm.index);
@@ -140,15 +159,20 @@ function lerTextoImagem(texto, hoje = TODAY) {
     let parc = null;
     const pcs = [...antes.matchAll(PARC_IMG)].filter(m => +m[1] >= 1 && +m[2] >= 2 && +m[2] <= 48 && +m[1] <= +m[2]);
     if (pcs.length) { const m = pcs[pcs.length - 1]; parc = { k: +m[1], n: +m[2] }; antesB = antesB.slice(0, m.index) + " " + antesB.slice(m.index + m[0].length); }
+    if (!parc && parcDepois) parc = parcDepois;
     let desc = limpaDesc(antesB);
     if (!/[A-Za-zÀ-ú]{2,}/.test(desc)) desc = descPend;
+    if (!parc) { const pd = norm(desc).match(PARC_PALAVRA); if (pd && +pd[1] >= 1 && +pd[2] >= 2 && +pd[1] <= +pd[2]) { parc = { k: +pd[1], n: +pd[2] }; desc = limpaDesc(desc.replace(new RegExp(PARC_PALAVRA.source, "i"), " ")); } } // "Parcela 1 de 2" na linha de cima
     descPend = "";
     if (!d && !dt) d = dataAtual; // prints agrupados por dia ("20 OUT"); em tabela fica em branco para preencher
     if (!desc && !d) { ignorados++; continue; } // linha de total sem descrição
     itens.push({ d: d || "", desc: desc.slice(0, 120), vs: neg ? -v : v, fitid: null, parc, venc, fat: venc ? venc.slice(0, 7) : null });
     ultimaLinhaItem = true;
   }
-  return { itens, ignorados, banco, cartao, linhas: brutas.length };
+  // vencimento da fatura escrito no documento ("Vencimento: 06/11/2026") → mês da fatura
+  const vg = N.match(/VENCIMENTO[^0-9\n]{0,25}(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})\b/);
+  const vencimento = vg && dataValida(vg[1], vg[2]) ? isoDe(vg[1], vg[2], vg[3], hoje) : null;
+  return { itens, ignorados, banco, cartao, vencimento, linhas: brutas.length };
 }
 function lerArquivo(nome, texto) {
   const ext = (nome.split(".").pop() || "").toLowerCase();
@@ -220,4 +244,4 @@ function analisar(S, itens, destino, faturaKey) {
 const catsDespesa = S => S.categorias.filter(c => c[1] !== "receita").map(c => c[0]);
 const catsReceita = S => S.categorias.filter(c => c[1] === "receita").map(c => c[0]);
 
-if (typeof module !== "undefined") module.exports = { lerTextoImagem, dataDaLinha, parseCSV, parseOFX, parseValor, parseDataBR, lerArquivo, analisar, achaParcela, parecido, IMP_PEND, IMP_GRAVA };
+if (typeof module !== "undefined") module.exports = { lerParcela, lerTextoImagem, dataDaLinha, parseCSV, parseOFX, parseValor, parseDataBR, lerArquivo, analisar, achaParcela, parecido, IMP_PEND, IMP_GRAVA };
