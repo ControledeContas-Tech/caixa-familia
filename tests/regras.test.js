@@ -11,7 +11,7 @@ function carregar(hoje = "2026-10-19") {
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   const codigo = ["core.js", "importar.js", "db.js"].map(f => fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8").replace(/if \(typeof module[^\n]*\n?/g, "")).join("\n;\n");
-  vm.runInContext(codigo + "\n;Object.assign(globalThis, { divEtapa, divResumo, seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte, lerTextoImagem });", ctx);
+  vm.runInContext(codigo + "\n;Object.assign(globalThis, { lerParcela, divEtapa, divResumo, seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte, lerTextoImagem });", ctx);
   return ctx;
 }
 const C = carregar();
@@ -294,4 +294,25 @@ test("simulador inclui dívida a negociar sem parcela mínima", () => {
   S.dividas.push({ id: "d-n2", nome: "Pendência", etapa: "negociar", saldo: 50000, parcela: 0, taxa: null, dia: 1, primeiro: "2026-10", total: 1 });
   const r = C.simular(S, 1000000, "saldo"), x = r.ds.find(d => d.id === "d-n2");
   assert.ok(x); assert.equal(x.min, 0); assert.ok(x.quita >= 1);
+});
+
+test("print: parcela reconhecida em vários formatos", () => {
+  const um = t => C.lerTextoImagem(t, "2026-10-22").itens;
+  const casos = [
+    "05/10 DA LOOVI TECHNOLOGY 114,90\nParcela 1 de 2",
+    "DA LOOVI TECHNOLOGY\nParcela 1 de 2\n05/10 R$ 114,90",
+    "05/10 DA LOOVI TECHNOLOGY 114,90 1/2",
+    "05/10 DA LOOVI TECHNOLOGY R$ 114,90 Parcela 01/02",
+    "05/10 DA LOOVI TECHNOLOGY 01/02 114,90",
+    "05/10 DA LOOVI TECHNOLOGY PARC 01 DE 02 114,90",
+  ];
+  for (const t of casos) { const it = um(t); assert.equal(it.length, 1, t); igual(it[0].parc, { k: 1, n: 2 }, t); assert.match(it[0].desc, /LOOVI TECHNOLOGY$/i, t); assert.equal(it[0].vs, 11490, t); }
+  // vencimento depois do valor continua sendo vencimento, não parcela
+  const v = um("05/10 MERCADO 50,00 06/11")[0]; assert.equal(v.parc, null); assert.equal(v.fat, "2026-11");
+  const v2 = um("05/10/2026 MERCADO 50,00 06/11/2026")[0]; assert.equal(v2.parc, null); assert.equal(v2.venc, "2026-11-06");
+});
+
+test("campo parcela aceita vários jeitos de escrever", () => {
+  for (const t of ["01/02", "1/2", "1 de 2", "01-02", "1x2", "Parcela 1 de 2", "parc. 01/02", "1 2"]) igual(C.lerParcela(t), { k: 1, n: 2 }, t);
+  for (const t of ["", "2", "3/2", "1/49", "à vista"]) assert.equal(C.lerParcela(t), null, t);
 });
