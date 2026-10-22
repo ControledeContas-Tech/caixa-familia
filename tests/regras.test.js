@@ -11,7 +11,7 @@ function carregar(hoje = "2026-10-19") {
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   const codigo = ["core.js", "importar.js", "db.js"].map(f => fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8").replace(/if \(typeof module[^\n]*\n?/g, "")).join("\n;\n");
-  vm.runInContext(codigo + "\n;Object.assign(globalThis, { seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte, lerTextoImagem });", ctx);
+  vm.runInContext(codigo + "\n;Object.assign(globalThis, { divEtapa, divResumo, seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte, lerTextoImagem });", ctx);
   return ctx;
 }
 const C = carregar();
@@ -263,4 +263,35 @@ test("compra de cartão com fatura informada cai nessa fatura, não na da data",
   S.lanc.push({ id: "l1", data: "2026-04-06", desc: "Compra antiga", tipo: "despesa", valor: 1000, cartao: "k1", fatura: "2026-11", origem: "importação" });
   assert.equal(C.fatura(S, card, "2026-11").total, 1000);
   assert.equal(C.fatura(S, card, "2026-05").total, 0);
+});
+
+test("dívida a negociar fica fora das contas até decidir; decisão gera parcelas; quitada some", () => {
+  const S = C.seed(), base = C.saldoLivre(S, "2026-12-31");
+  const d = { id: "d-neg", nome: "Itaú atrasado", credor: "Itaú", etapa: "negociar", saldo: 300000, parcela: 0, taxa: null, dia: 1, primeiro: "2026-10", total: 1, prioridade: "Alta", conta: null, situacao: "Em dia", obs: "" };
+  S.dividas.push(d);
+  assert.equal(C.saldoLivre(S, "2026-12-31").livre, base.livre, "a negociar não mexe no saldo livre");
+  assert.ok(!C.compromissos(S, "2026-10", "2027-12").some(c => c.ref === d));
+  assert.equal(C.divResumo(S, d).falta, 300000);
+  // decide: acordo de R$ 1.200,00 em 3x a partir de 11/2026
+  Object.assign(d, { etapa: "pagamento", decisao: "acordo", valorOriginal: 300000, saldo: 120000, total: 3, parcela: 40000, primeiro: "2026-11", dia: 10 });
+  const cs = C.compromissos(S, "2026-10", "2027-03").filter(c => c.ref === d);
+  igual(cs.map(c => c.venc), ["2026-11-10", "2026-12-10", "2027-01-10"]);
+  assert.equal(C.saldoLivre(S, "2026-12-31").livre, base.livre - 80000, "duas parcelas até dezembro entram no comprometido");
+  assert.equal(C.divResumo(S, d).falta, 120000);
+  // paga a 1ª
+  S.inst["d-neg|2026-11"] = { pag: [{ id: "pg1", lanc: null, valor: 40000, data: "2026-11-10" }] };
+  const r = C.divResumo(S, d); assert.equal(r.falta, 80000); assert.equal(r.pagas, 1); assert.equal(r.proxima.venc, "2026-12-10");
+  // quitada: parcelas abertas somem, a paga fica no histórico
+  d.etapa = "quitada"; d.quitadaEm = "2026-11-15";
+  const depois = C.compromissos(S, "2026-10", "2027-03").filter(c => c.ref === d);
+  assert.equal(depois.length, 1); assert.equal(depois[0].status, "paga");
+  assert.equal(C.divResumo(S, d).falta, 0);
+  assert.equal(C.saldoLivre(S, "2026-12-31").livre, base.livre);
+});
+
+test("simulador inclui dívida a negociar sem parcela mínima", () => {
+  const S = C.seed();
+  S.dividas.push({ id: "d-n2", nome: "Pendência", etapa: "negociar", saldo: 50000, parcela: 0, taxa: null, dia: 1, primeiro: "2026-10", total: 1 });
+  const r = C.simular(S, 1000000, "saldo"), x = r.ds.find(d => d.id === "d-n2");
+  assert.ok(x); assert.equal(x.min, 0); assert.ok(x.quita >= 1);
 });
