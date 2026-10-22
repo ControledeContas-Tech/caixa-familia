@@ -110,75 +110,7 @@ function topbar(title, sub = "") {
 const head = (h2, right = "") => `<div class="panel-head"><h2>${h2}</h2>${right}</div>`;
 
 // ================= TELAS =================
-function vPainel() {
-  const sl = saldoLivre(S, hzDate()), res = S.cartoes.map(c => ({ c, r: cardResumo(S, c) }));
-  const devCart = sum(res, x => x.r.deve), divSaldo = sum(S.dividas, d => d.saldo), patr = sum(S.invest, i => investSaldo(i));
-  const recPrev = sum(compromissos(S, CUR, CUR).filter(c => c.tipo === "receita"), c => c.valor), recReal = receitasMes(S, CUR);
-  const pagoMes = sum(S.lanc.filter(l => !l.excluido && ymOf(l.data) === CUR && ((l.tipo === "despesa" && !l.cartao) || (l.tipo === "transferencia" && S.cartoes.some(c => c.id === l.destino)))), l => l.valor);
-  const contasPend = sum(sl.comps.filter(c => c.kind !== "fat"), c => c.restante), fatAbertas = sum(res, x => x.r.atual.saldo), futuras = sum(res, x => x.r.futuras), reservado = sum(S.provisoes, p => provReservado(S, p));
-  const maxL = Math.max(1, ...S.cartoes.map(c => c.limite));
-  const gm = {}; gastosMes(S, CUR).forEach(r => gm[r.cat] = (gm[r.cat] || 0) + r.valor);
-  const cats = Object.entries(gm).filter(e => e[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => ({ k, l: k, v }));
-  const proj = projecao(S, ui.varMes);
-  const prox = compromissos(S, CUR, addYM(CUR, 1)).filter(c => c.tipo === "despesa" && ativo(c) && c.restante > 0).slice(0, 7);
-  const meses = [addYM(CUR, -1), CUR].map(ym => ({ l: ymLabel(ym) + (ym === CUR ? " (até hoje)" : ""), v: [receitasMes(S, ym), sum(gastosMes(S, ym), r => r.valor)] }));
-  const passos = [[S.contas.length > 0, "Cadastre as contas e o dinheiro em espécie", "ajustes", "contas"], [S.cartoes.length > 0, "Cadastre os cartões com fechamento e vencimento", "ajustes", "cartoes"], [S.rec.length > 0, "Registre as contas fixas e os salários", "contas", "rec"], [S.lanc.length > 0 || S.parc.length > 0, "Importe um extrato ou fatura (CSV/OFX)", "importar", ""]];
-  const bemvindo = passos.every(p => p[0]) ? "" : `<section class="panel start">${head("Primeiros passos", `<span class="hint">${passos.filter(p => p[0]).length} de ${passos.length}</span>`)}<ol class="steps">${passos.map(([ok, t, v, a]) => `<li class="${ok ? "ok" : ""}"><span>${t}</span>${ok ? '<span class="pill p-good">Feito</span>' : `<button class="mini primary" data-go="${v}" ${v === "ajustes" ? `data-aj="${a}"` : ""} ${v === "contas" ? 'data-act="comptab" data-arg="rec"' : ""}>Fazer agora</button>`}</li>`).join("")}</ol></section>`;
-  return `${topbar("Painel", "Hoje, " + br(TODAY))}${bemvindo}
-  <section class="kpis" aria-label="Indicadores principais">
-    <div class="kpi hero">
-      <div class="hero-top"><span class="eyebrow">Saldo livre estimado</span><select id="hz" aria-label="Período">${opts(Object.entries(HZ).map(([k, v]) => [k, v[0]]), ui.hz)}</select></div>
-      ${ui.hz === "periodo" ? `<form class="hz-form" data-form="periodo"><label class="sr" for="hz-ini">Data inicial</label><input id="hz-ini" name="ini" type="date" value="${ui.hzIni}" required><span>a</span><label class="sr" for="hz-fim">Data final</label><input id="hz-fim" name="fim" type="date" value="${ui.hzFim}" required><button class="mini primary">Aplicar</button></form>` : ""}
-      <button class="v num" data-calc="livre">${fmt(sl.livre)}</button>
-      <span class="s">Quanto dá para gastar ${hzTexto()} sem faltar para os compromissos${ui.hz === "periodo" && ui.hzIni > TODAY ? " do período e os que vencem antes dele" : ""}. Não conta os ${fmt(sl.aReceber)} que ainda vão entrar.${ui.hz === "periodo" && ui.hzFim < TODAY ? " <b>Período já encerrado:</b> só entram contas que ficaram sem pagar. Para ver o que aconteceu, use Planejamento → Realizado." : ""}</span>
-      <button class="how" data-calc="livre">Ver memória de cálculo →</button>
-    </div>
-    <button class="kpi" data-calc="caixa"><span class="eyebrow">Saldo de caixa</span><span class="v num">${fmt(sl.caixa)}</span><span class="s">${S.contas.filter(c => c.caixa).length} contas disponíveis</span></button>
-    <button class="kpi" data-calc="comp"><span class="eyebrow">Comprometido</span><span class="v num">${fmt(sl.comprometido)}</span><span class="s">${sl.comps.length} compromissos até ${br(hzDate())}</span></button>
-    <button class="kpi" data-go="cartoes"><span class="eyebrow">Devemos nos cartões</span><span class="v num">${fmt(devCart)}</span><span class="s">Faturas + parcelas futuras</span></button>
-    <button class="kpi" data-calc="receitas"><span class="eyebrow">Receitas de ${MESL[+CUR.slice(5) - 1]}</span><span class="v num">${fmt(recReal)}</span><span class="s">de ${fmt(recPrev)} previstas</span></button>
-    <button class="kpi" data-go="dividas"><span class="eyebrow">Saldo devedor das dívidas</span><span class="v num">${fmt(divSaldo)}</span><span class="s">${S.dividas.length} dívidas ativas</span></button>
-    <button class="kpi" data-go="investimentos"><span class="eyebrow">Patrimônio investido</span><span class="v num">${fmt(patr)}</span><span class="s">Valores informados</span></button>
-  </section>
-  <section class="strip" aria-label="Outros indicadores">
-    <button data-calc="pago"><span>Pago no mês</span><b class="num">${fmt(pagoMes)}</b></button>
-    <button data-go="contas"><span>Contas pendentes</span><b class="num">${fmt(contasPend)}</b></button>
-    <button data-go="cartoes"><span>Faturas em aberto</span><b class="num">${fmt(fatAbertas)}</b></button>
-    <button data-go="cartoes"><span>Parcelas futuras</span><b class="num">${fmt(futuras)}</b></button>
-    <button data-go="dividas"><span>Reservado em provisões</span><b class="num">${fmt(reservado)}</b></button>
-  </section>
-  <div class="grid2">
-    <section class="panel">
-      ${head("Cartões de crédito", `<span class="hint">Barra no tamanho do limite</span>`)}
-      <div class="cards">${res.length ? "" : `<p class="note">Nenhum cartão cadastrado. <button class="linkbtn" data-go="ajustes" data-aj="cartoes">Cadastrar cartão</button></p>`}${res.map(({ c, r }) => `
-        <button class="cardrow" data-go="cartoes" data-card="${c.id}">
-          <span class="cr-n"><b>${esc(c.nome)}</b><span class="meta">Fatura ${ymLabel(r.atual.key)} ${pill(r.atual.status)} · vence ${brs(r.atual.vence)}</span></span>
-          <span class="barcell"><span class="bar" style="width:${(c.limite / maxL * 100).toFixed(1)}%"><span class="a" style="width:${(r.atual.saldo / c.limite * 100).toFixed(1)}%"></span><span class="b" style="width:${(r.futuras / c.limite * 100).toFixed(1)}%"></span></span>
-            <span class="meta">Disponível estimado ${fmt(r.disponivel)} de ${fmt(c.limite)}</span></span>
-          <span class="amt"><b class="num">${fmt(r.atual.saldo)}</b><span class="meta num">+ ${fmt(r.futuras)} futuras</span></span>
-        </button>`).join("")}</div>
-      <div class="legend"><span><i></i>Fatura atual</span><span><i class="b"></i>Parcelas e faturas seguintes</span></div>
-    </section>
-    <section class="panel">
-      ${head("Próximos compromissos", `<button class="mini" data-go="contas">Contas a pagar</button>`)}
-      <div class="list">${prox.length ? "" : `<p class="note">Nada pendente nos próximos dois meses.</p>`}${prox.map(c => `<div class="li"><span class="d num">${brs(c.venc)}</span><span class="t">${esc(c.desc)}${c.venc < TODAY ? ' <span class="pill p-crit">Vencida</span>' : ""}<span class="sub">${c.status === "parcial" ? "restante de " + fmt(c.valor) : c.origem}</span></span><span class="num">${fmt(c.restante)}</span></div>`).join("")}</div>
-    </section>
-  </div>
-  <div class="grid2">
-    <section class="panel">
-      ${head("Gastos por categoria · " + MESL[+CUR.slice(5) - 1], `<span class="hint">Cartão pela fatura do mês</span>`)}
-      ${cats.length ? hbars(cats, "catmes") : `<p class="note">Nenhum gasto registrado neste mês.</p>`}
-    </section>
-    <section class="panel chart">
-      ${head("Receitas × gastos", `<span class="legend inl"><span><i></i>Receitas</span><span><i class="c2"></i>Gastos</span></span>`)}
-      ${groupChart(meses, [{ n: "Receitas", c: "var(--accent)" }, { n: "Gastos", c: "var(--c2)" }])}
-    </section>
-  </div>
-  <section class="panel chart">
-    ${head("Saldo livre projetado · próximos 12 meses", `<span class="hint">Inclui receitas previstas e ${fmt(ui.varMes)}/mês de gastos variáveis estimados</span>`)}
-    ${barChart(proj.meses.map(m => ({ k: m.ym, l: ymLabel(m.ym).slice(0, 3), v: m.fim })), { onClick: "projmes" })}
-  </section>`;
-}
+// Painel: ver js/painel.js (cada quadro com o seu período)
 
 // ---------- lançamentos ----------
 function linhas(ym) {
@@ -386,35 +318,7 @@ function vPlan() {
   </div>${body}`;
 }
 
-// ---------- dívidas e provisões ----------
-function vDividas() {
-  const sims = [["juros", "Maiores juros primeiro"], ["saldo", "Menores saldos primeiro"]].map(([k, l]) => ({ k, l, r: simular(S, ui.simOrc, k) }));
-  const semDiv = !S.dividas.some(d => d.saldo > 0);
-  const quita = n => n === null ? "—" : ymLong(addYM(CUR, n));
-  return `${topbar("Dívidas e provisões")}
-  <section class="panel flush">
-    ${head("Dívidas", `<button class="btn" data-act="novadiv">+ Dívida</button>`).replace('class="panel-head"', 'class="panel-head pad"')}
-    <div class="tbl-wrap"><table class="rows"><thead><tr><th>Dívida</th><th>Credor</th><th class="r">Saldo devedor</th><th class="r">Parcela</th><th>Juros</th><th>Restam</th><th>Prioridade</th><th>Situação</th></tr></thead><tbody>
-    ${S.dividas.map(d => { const pagas = ymDiff(d.primeiro, CUR) + 1 - (ativo(compromissos(S, CUR, CUR).find(c => c.key === d.id + "|" + CUR) || { status: "paga" }) ? 1 : 0); return `<tr data-act="verdiv" data-arg="${d.id}" tabindex="0"><td><b>${esc(d.nome)}</b><div class="sub">vence dia ${pad(d.dia)}</div></td><td>${esc(d.credor)}</td><td class="r num">${fmt(d.saldo)}</td><td class="r num">${fmt(d.parcela)}</td><td>${d.taxa ? d.taxa.toLocaleString("pt-BR") + "% a.m." : '<span class="pill p-warn">Não informada</span>'}</td><td class="num">${d.total - pagas} de ${d.total}</td><td>${d.prioridade}</td><td>${pill(d.situacao === "Em dia" ? "paga" : "pendente").replace(/Paga|Pendente/, d.situacao)}</td></tr>`; }).join("")}
-    </tbody><tfoot><tr><td colspan="2">Total</td><td class="r num">${fmt(sum(S.dividas, d => d.saldo))}</td><td class="r num">${fmt(sum(S.dividas, d => d.parcela))}</td><td colspan="4"></td></tr></tfoot></table></div>
-  </section>
-  ${semDiv ? "" : `<section class="panel">
-    ${head("Planejador de quitação", `<label class="inline-field">Quanto podem pagar por mês <input id="simorc" inputmode="decimal" value="${(ui.simOrc / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}"></label>`)}
-    ${sims[0].r.insuf ? `<div class="check bad">O valor mensal é menor que a soma das parcelas mínimas (${fmt(sims[0].r.minTot)}). Com ele, alguma dívida atrasa.</div>` : ""}
-    <div class="sims">${sims.map(({ k, l, r }) => `<div class="sim ${k === (sims[0].r.juros <= sims[1].r.juros ? "juros" : "saldo") ? "best" : ""}">
-      <div class="sim-h"><b>${l}</b>${k === (sims[0].r.juros <= sims[1].r.juros ? "juros" : "saldo") ? '<span class="pill p-good">Menos juros</span>' : ""}</div>
-      <div class="sim-n"><div><span>Tudo quitado em</span><b>${r.meses} meses</b><span class="sub">${quita(r.meses)}</span></div><div><span>Juros estimados</span><b class="num">${fmt(r.juros)}</b></div></div>
-      <ol class="order">${[...r.ds].sort((a, b) => a.quita - b.quita).map(d => `<li><span>${esc(d.nome)}</span><span class="sub">${quita(d.quita)}${d.taxa ? "" : " · estimada sem juros"}</span></li>`).join("")}</ol></div>`).join("")}</div>
-    <p class="note">Simulação apenas: nenhum pagamento é feito. A dívida sem taxa informada é projetada sem juros, e a projeção dela é uma estimativa.</p>
-  </section>`}
-  <section class="panel flush">
-    ${head("Provisões para obrigações futuras", `<button class="btn" data-act="novaprov">+ Provisão</button>`).replace('class="panel-head"', 'class="panel-head pad"')}
-    <div class="tbl-wrap"><table class="rows"><thead><tr><th>Objetivo</th><th>Onde está o dinheiro</th><th>Uso previsto</th><th>Reservado</th><th class="r">Falta</th><th></th></tr></thead><tbody>
-    ${S.provisoes.map(p => { const r = provReservado(S, p); return `<tr><td><b>${esc(p.nome)}</b></td><td>${p.conta ? `<span class="pill p-good">Separada</span> <span class="sub">${esc(nomeDe(p.conta))}</span>` : '<span class="pill p-info">Planejada</span> <span class="sub">dentro do caixa</span>'}</td><td>${ymLong(p.uso)}</td><td><span class="bar prog"><span class="a" style="width:${Math.min(100, r / p.alvo * 100).toFixed(0)}%"></span></span><span class="sub num"> ${fmt(r)} de ${fmt(p.alvo)}</span></td><td class="r num">${fmt(Math.max(0, p.alvo - r))}</td><td class="r"><span class="actions"><button class="mini" data-act="aporte" data-arg="${p.id}">Reservar mais</button><button class="mini" data-act="verprov" data-arg="${p.id}">Histórico</button></span></td></tr>`; }).join("")}
-    </tbody></table></div>
-  </section>
-  <p class="note">Provisão separada já está numa conta fora do caixa, então não é descontada de novo do saldo livre. Provisão planejada é descontada do saldo livre, porque o dinheiro ainda está misturado no caixa.</p>`;
-}
+// ---------- dívidas: ver js/dividas.js (etapas: a negociar → em pagamento → quitada) ----------
 
 // ---------- investimentos ----------
 function vInvest() {
@@ -1035,7 +939,7 @@ function estimativas() {
   if (ui.simOrc === null) { const m = sum(S.dividas, d => d.parcela); ui.simOrc = Math.max(10000, Math.round(m * 1.25 / 1000) * 1000); }
   if (!ui.card || !cardOf(S, ui.card)) ui.card = S.cartoes[0] ? S.cartoes[0].id : null;
 }
-const VIEWFN = { painel: vPainel, lancamentos: vLanc, cartoes: vCartoes, contas: vContas, planejamento: vPlan, dividas: vDividas, investimentos: vInvest, importar: vImport, ajustes: vAjustes };
+const VIEWFN = { painel: () => "", lancamentos: vLanc, cartoes: vCartoes, contas: vContas, planejamento: vPlan, dividas: () => "", investimentos: vInvest, importar: vImport, ajustes: vAjustes };
 if (!VIEWFN[ui.view]) ui.view = "painel";
 function go(v) { ui.view = v; ui.more = false; ui.userMenu = false; closeLayer(); render(); window.scrollTo(0, 0); }
 function render() {

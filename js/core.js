@@ -315,8 +315,10 @@ function compromissos(S, from, to) {
       out.push(c);
     }
     for (const d of S.dividas) {
+      const et = divEtapa(d); if (et === "negociar") continue; // a negociar: existe, mas fica fora das contas
       const n = ymDiff(d.primeiro, ym) + 1; if (n < 1 || n > d.total || ym < ymOf(S.inicio)) continue;
       const k = d.id + "|" + ym, i = S.inst[k] || {}, valor = i.valor ?? d.parcela, pago = sum(i.pag || [], p => p.valor), desc = i.desconto || 0;
+      if (et === "quitada" && !pago) continue; // quitada: só fica o histórico do que foi pago
       const c = { key: k, kind: "div", ref: d, desc: d.nome + " " + n + "/" + d.total, cat: "Dívidas", tipo: "despesa", valor, pago, desconto: desc, restante: valor - desc - pago, venc: i.venc || mk(ym, d.dia), origem: "dívida", inst: i, conta: d.conta };
       c.status = compStatus(Object.assign({}, c, i)); out.push(c);
     }
@@ -378,9 +380,24 @@ function projecao(S, varMes) {
   return { inicio: base.livre + base.aReceber, meses: out };
 }
 
-// simulador de quitação
+// dívidas por etapas: "negociar" (fora das contas) → "pagamento" (parcelas em Contas a pagar) → "quitada"
+const divEtapa = d => d.etapa || "pagamento";
+const DECISOES = { quitar: "Quitação à vista", acordo: "Acordo negociado", parcelar: "Parcelamento", contrato: "Contrato / empréstimo" };
+// situação de uma dívida em pagamento: parcelas, quanto falta e a próxima
+function divResumo(S, d) {
+  const et = divEtapa(d);
+  if (et === "negociar") return { etapa: et, falta: d.saldo, pagas: 0, total: 0, parcelas: [], proxima: null, pago: 0 };
+  const fimYM = addYM(d.primeiro, d.total - 1);
+  const parcelas = d.total > 0 ? compromissos(S, d.primeiro < ymOf(S.inicio) ? ymOf(S.inicio) : d.primeiro, fimYM).filter(c => c.kind === "div" && c.ref.id === d.id) : [];
+  const antes = Math.max(0, Math.min(d.total, ymDiff(d.primeiro, ymOf(S.inicio)))); // parcelas de antes do início do controle contam como pagas
+  const abertas = parcelas.filter(c => ativo(c) && c.restante > 0);
+  const falta = et === "quitada" ? 0 : sum(abertas, c => c.restante);
+  const pago = sum(parcelas, c => c.pago);
+  return { etapa: et, falta, pagas: antes + parcelas.filter(c => !ativo(c) || c.restante <= 0).length, total: d.total, parcelas, proxima: et === "quitada" ? null : abertas[0] || null, pago, atrasadas: abertas.filter(c => c.venc < TODAY).length };
+}
+// simulador de quitação (dívidas em pagamento e a negociar; a negociar não tem parcela mínima)
 function simular(S, orcamento, estrategia) {
-  const ds = S.dividas.filter(d => d.saldo > 0).map(d => ({ id: d.id, nome: d.nome, saldo: d.saldo, taxa: d.taxa, min: d.parcela, quita: null, juros: 0 }));
+  const ds = S.dividas.filter(d => divEtapa(d) !== "quitada").map(d => { const r = divResumo(S, d); return { id: d.id, nome: d.nome, etapa: r.etapa, saldo: r.falta, taxa: d.taxa, min: r.etapa === "negociar" ? 0 : d.parcela, quita: null, juros: 0 }; }).filter(d => d.saldo > 0);
   let mes = 0, insuf = false;
   const minTot = sum(ds, d => d.min);
   if (orcamento < minTot) insuf = true;
@@ -400,4 +417,4 @@ function simular(S, orcamento, estrategia) {
 // sugestão de categoria pelas regras explícitas
 function sugerirCat(S, desc) { const n = norm(desc); const r = [...S.regras].sort((a, b) => a.prio - b.prio).find(r => n.includes(norm(r.trecho))); return r ? { cat: r.cat, sub: r.sub, regra: r.trecho } : null; }
 
-if (typeof module !== "undefined") module.exports = { cpfValido, cpfFmt, diasAte, vazio, rid, parcVal, fatItens, ativo, sugerirCat, closeOf, dueOf, parseBRL, norm, ymOf, ymDiff, addDays, investAportado, investRend, netConta, seed, saldoLivre, cardResumo, fatura, cardOf, caixa, compromissos, projecao, simular, gastosMes, saldoConta, investSaldo, keyOf, fmt, TODAY, CUR, mk, addYM, receitasMes, provReservado };
+if (typeof module !== "undefined") module.exports = { cpfValido, cpfFmt, diasAte, vazio, rid, parcVal, fatItens, ativo, sugerirCat, closeOf, dueOf, parseBRL, norm, ymOf, ymDiff, addDays, investAportado, investRend, netConta, seed, saldoLivre, cardResumo, fatura, cardOf, caixa, compromissos, projecao, simular, gastosMes, saldoConta, investSaldo, keyOf, fmt, TODAY, CUR, mk, addYM, receitasMes, provReservado, divEtapa, divResumo, DECISOES };
