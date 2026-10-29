@@ -11,7 +11,7 @@ function carregar(hoje = "2026-10-19") {
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   const codigo = ["core.js", "importar.js", "db.js"].map(f => fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8").replace(/if \(typeof module[^\n]*\n?/g, "")).join("\n;\n");
-  vm.runInContext(codigo + "\n;Object.assign(globalThis, { lerParcela, divEtapa, divResumo, seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte, lerTextoImagem });", ctx);
+  vm.runInContext(codigo + "\n;Object.assign(globalThis, { candidatosDup, achaIgual, lerParcela, divEtapa, divResumo, seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte, lerTextoImagem });", ctx);
   return ctx;
 }
 const C = carregar();
@@ -140,7 +140,7 @@ test("importar de novo não duplica: compra igual vira duplicata, parcela já pr
   const S = C.seed();
   const itens = C.parseCSV("date,title,amount\n2026-10-17,OUTBACK STEAKHOUSE,286.60\n2026-10-13,LEROY MERLIN ARMARIO 01/06,412.50\n2026-10-18,DROGA RAIA,54.90\n2026-10-18,MERCADOLIVRE 01/03,79.90\n").itens;
   const a = C.analisar(S, itens, "nubank", "2026-11");
-  assert.equal(a[0].st, "dup");
+  assert.equal(a[0].st, "link"); assert.equal(a[0].dupAuto, true); // mesma compra, mesmo valor e data: já registrada
   assert.equal(a[1].st, "link");
   assert.equal(a[2].st, "ok");
   assert.equal(a[2].cat, "Saúde");
@@ -327,4 +327,30 @@ test("PDF de fatura: só lançamentos com data entram; resumos e encargos ficam 
     ["2026-10-28", "PICPAY*Emanoella SAO PAULO", "12/12", 26849],
     ["2026-04-06", "PICPAY*EMANOELLA LOP SAO PAULO", "7/8", 12852],
     ["2026-10-02", "PAGAMENTO RECEBIDO - OBRIGADO", null, -109445]]);
+});
+
+test("duplicidade: mesma fatura em dois arquivos da mesma importação não entra duas vezes", () => {
+  const S = C.seed();
+  const linhas = [{ d: "2026-10-18", desc: "IFD*MADERO INDUSTRIA E", vs: 589 }, { d: "2026-10-18", desc: "IFD*MADERO INDUSTRIA E", vs: 589 }, { d: "2026-10-12", desc: "OKEO, SAO PAULO", vs: 540 }];
+  const a1 = C.analisar(S, linhas, "nubank", "2026-11");
+  assert.deepEqual(a1.map(i => i.st), ["ok", "ok", "ok"]); // dentro do mesmo arquivo, compras iguais são compras diferentes
+  const extras = a1.map(i => ({ d: i.d, desc: i.desc, v: i.v, tipo: "despesa", n: 0, key: "2026-11", rot: "arquivo A desta importação" }));
+  // o mesmo conteúdo vindo de outro arquivo (PDF da mesma fatura, com a descrição lida um pouco diferente)
+  const a2 = C.analisar(S, [{ d: "2026-10-18", desc: "IFD*MADERO INDUSTRIA", vs: 589 }, { d: "2026-10-18", desc: "IFD *MADERO INDUSTRIA E", vs: 589 }, { d: "2026-10-12", desc: "OKEO SAO PAULO", vs: 540 }, { d: "2026-10-12", desc: "OKEO SAO PAULO", vs: 540 }], "nubank", "2026-11", extras);
+  assert.deepEqual(a2.map(i => i.st), ["link", "link", "link", "ok"]); // o 4º OKEO não tem par: é outra compra
+});
+
+test("duplicidade: mesma compra lida com nome ou parcela diferente vira 'possível duplicata'; loja diferente não some", () => {
+  const S = C.seed();
+  S.parc.push({ id: "pX", cartao: "nubank", desc: "SAO LUIZ COSMETICOS,SAO PAULO", cat: "Beleza", data: "2026-08-16", total: 14994, n: 3, resp: "Manu", k0: "2026-09" });
+  const a = C.analisar(S, [{ d: "2026-08-16", desc: "SCALON COSMETICOS,SAO PAULO", vs: 4997, parc: { k: 3, n: 4 } }], "nubank", "2026-11");
+  assert.equal(a[0].st, "dup"); assert.match(a[0].note, /SAO LUIZ/);
+  // mesmo valor e mesmo dia, mas outra loja: pergunta, não esconde sozinho
+  S.lanc.push({ id: "lP", data: "2026-10-05", desc: "PADARIA REAL", tipo: "despesa", valor: 1000, cartao: "nubank", cat: "Alimentação", origem: "manual" });
+  const b = C.analisar(S, [{ d: "2026-10-05", desc: "FARMACIA SAO JOAO", vs: 1000 }], "nubank", "2026-11");
+  assert.equal(b[0].st, "dup");
+  // assinatura de todo mês (mesmo nome e valor, 30 dias depois) não é duplicata
+  S.lanc.push({ id: "lN", data: "2026-09-10", desc: "NETFLIX.COM", tipo: "despesa", valor: 5590, cartao: "nubank", cat: "Lazer", origem: "manual" });
+  const c = C.analisar(S, [{ d: "2026-10-10", desc: "NETFLIX.COM", vs: 5590 }], "nubank", "2026-11");
+  assert.equal(c[0].st, "ok");
 });
