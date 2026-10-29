@@ -393,12 +393,14 @@ function vImport() {
         : it.st === "parc" ? `<button class="mini" data-imp="${k}" data-to="parcok">Confirmar ${it.n}×</button><button class="mini" data-imp="${k}" data-to="avista">É à vista</button>`
         : it.st === "comp" ? `<button class="mini ghost" data-imp="${k}" data-to="ok">Não é essa conta</button><button class="mini ghost" data-imp="${k}" data-to="skip">Não importar</button>`
         : it.st === "parcok" && a.img ? `<button class="mini ghost" data-imp="${k}" data-to="avista">É à vista</button><button class="mini ghost" data-imp="${k}" data-to="skip">Não importar</button>`
+        : it.st === "link" && it.dupAuto ? `<button class="mini ghost" data-imp="${k}" data-to="keep" title="Grava esta linha mesmo assim">É outra compra</button>`
         : IMP_GRAVA.includes(it.st) ? `<button class="mini ghost" data-imp="${k}" data-to="skip">Não importar</button>`
         : it.st === "skip" && !["link", "info"].includes(it.orig) ? `<button class="mini ghost" data-imp="${k}" data-to="${it.orig || "ok"}">Desfazer</button>` : ""}${a.img ? `<button class="mini ghost" data-act="impremover" data-arg="${k}" aria-label="Remover linha">✕</button>` : ""}</span></td></tr>`; }).join("")}
     </tbody></table></div></div>${a.img ? `<div class="pad-x"><button class="mini" data-act="impadd" data-arg="${fi}">+ Adicionar linha que faltou</button></div>` : ""}`}</section>`; }).join("") : ""}
   ${P ? `<div class="check ${pendentes ? "bad" : "ok"}">${lendo ? `<b>Lendo o print…</b> Aguarde terminar para revisar.` : semAlvo ? `<b>Escolha o cartão ou a conta</b> ${semAlvo > 1 ? "dos arquivos marcados" : "do arquivo marcado"} acima para continuar.` : incompletos ? `<b>${incompletos} ${incompletos > 1 ? "linhas estão" : "linha está"} sem data, descrição ou valor.</b> Complete ou remova para gravar.` : pendentes ? `<b>${pendentes} ${pendentes > 1 ? "itens precisam" : "item precisa"} da sua decisão.</b> A gravação fica bloqueada até que tudo esteja resolvido.` : `<b>Tudo conferido.</b> Nenhum valor foi completado por suposição, e nenhuma parcela já existente será criada de novo.`}</div>
-    <div class="footer-bar"><span class="sub">Duplicatas nunca são apagadas sozinhas: você decide cada uma.</span><span class="actions"><button class="btn" data-act="descartar">Descartar</button><button class="btn primary" data-act="gravarimp" ${pendentes || !gravaveis ? "disabled" : ""}>Gravar ${gravaveis} lançamento${gravaveis === 1 ? "" : "s"}</button></span></div>`
+    <div class="footer-bar"><span class="sub">${todos.filter(i => i.st === "link" && i.dupAuto).length ? `<b>${todos.filter(i => i.st === "link" && i.dupAuto).length} linha${todos.filter(i => i.st === "link" && i.dupAuto).length === 1 ? "" : "s"} já registrada${todos.filter(i => i.st === "link" && i.dupAuto).length === 1 ? "" : "s"}</b> (aqui ou em outro arquivo desta importação) não ser${todos.filter(i => i.st === "link" && i.dupAuto).length === 1 ? "á" : "ão"} gravada${todos.filter(i => i.st === "link" && i.dupAuto).length === 1 ? "" : "s"} de novo. ` : ""}Possíveis duplicatas esperam a sua decisão.</span><span class="actions"><button class="btn" data-act="descartar">Descartar</button><button class="btn primary" data-act="gravarimp" ${pendentes || !gravaveis ? "disabled" : ""}>Gravar ${gravaveis} lançamento${gravaveis === 1 ? "" : "s"}</button></span></div>`
   : !semDestino ? `<section class="panel"><h2>Onde conseguir os arquivos</h2><ul class="tips"><li><b>Nubank:</b> no app, abra a fatura e toque em “Exportar fatura” (CSV); para a conta, “Pedir extrato” em OFX ou CSV.</li><li><b>Itaú, Bradesco, Santander, Banco do Brasil, Caixa:</b> no internet banking, extrato → salvar como OFX (Money) ou CSV.</li><li><b>Inter:</b> extrato → exportar em OFX ou CSV.</li><li><b>Só tem o print?</b> Tire um print da fatura ou do extrato (de preferência com as datas visíveis) e cole aqui com Ctrl+V ou escolha a imagem. Confira os valores lidos antes de gravar.</li><li>PDF: a leitura chega na próxima etapa.</li></ul></section>` : ""}
+  ${(() => { const g = gruposDuplicados(); return g.length ? `<div class="check bad dup-aviso"><span><b>${g.length} ${g.length === 1 ? "grupo" : "grupos"} de lançamentos que parecem duplicados</b> (mesmo cartão ou conta, mesma data e mesmo valor). Isso distorce os totais.</span><button class="mini primary" data-act="dupver">Revisar duplicados</button></div>` : ""; })()}
   <section class="panel flush">${head("Histórico de importações").replace('class="panel-head"', 'class="panel-head pad"')}
     ${S.importacoes.length ? `<div class="tbl-wrap"><table class="rows"><thead><tr><th>Lote</th><th>Data</th><th>Arquivos</th><th>Quem</th><th class="r">Incluídos</th><th class="r">Vinculados</th><th class="r">Ignorados</th><th></th></tr></thead><tbody>
     ${S.importacoes.map(h => `<tr><td class="num">${esc(h.id)}</td><td class="num">${tsBr(h.data)}</td><td class="sub">${esc(h.arquivos)}</td><td>${esc(h.user)}</td><td class="r num">${h.incl}</td><td class="r num">${h.vinc}</td><td class="r num">${h.ign}</td><td class="r"><button class="mini" data-act="desfazerimp" data-arg="${esc(h.id)}">Desfazer</button></td></tr>`).join("")}
@@ -423,15 +425,27 @@ function adivinhaFatura(card, itens, vencDoc) {
   return best ? best[0] : keyOf(card, TODAY);
 }
 // reanalisa um arquivo (depois de mudar data, valor, parcela, destino ou fatura) sem perder o que a pessoa já escolheu à mão
-function reanalisa(a) {
-  a.itens = analisar(S, a.raw, a.destino, a.fatura);
+// a importação inteira é analisada em ordem: cada arquivo é comparado com o que já está gravado E com os arquivos anteriores desta importação
+function reanalisa() {
+  if (!S.pend) return;
+  const vistos = [];
+  for (const a of S.pend.arquivos) {
+    if (a.erro || a.lendo || !a.destino) continue;
+    reanalisaUm(a, vistos.filter(x => x.destino === a.destino));
+    const card = cardOf(S, a.destino);
+    a.itens.forEach(it => { if (IMP_GRAVA.includes(it.st) || it.st === "parc") vistos.push({ destino: a.destino, d: it.d, desc: it.desc, v: it.v, n: it.st === "parcok" || it.st === "parc" ? it.n : 0, tipo: it.tipo, key: card ? it.fat || a.fatura || (it.d ? keyOf(card, it.d) : null) : null, rot: `arquivo “${a.nome}” desta importação` }); });
+  }
+}
+function reanalisaUm(a, extras) {
+  a.itens = analisar(S, a.raw, a.destino, a.fatura, extras);
   a.itens.forEach((it, i) => {
     const r = a.raw[i]; if (!r) return;
     if (a.img && it.st === "parc" && r.parc) it.st = "parcok";
     if (r.catUser && it.tipo !== "transferencia") { it.cat = r.catUser; it.sub = ""; }
-    const u = r.stUser; if (!u || it.st === "link") return;
+    const u = r.stUser; if (!u || (it.st === "link" && !(it.dupAuto && u === "keep"))) return;
     if (u === "skip") { it.orig = it.st; it.st = "skip"; }
     else if ((u === "avista" || u === "parcok") && it.n) it.st = u;
+    else if (u === "keep" && it.st === "link" && it.dupAuto) { it.st = "keep"; it.note = "Você confirmou que é outra compra."; }
     else if ((u === "keep" || u === "ok") && ["dup", "comp"].includes(it.st)) { if (it.st === "comp") { it.comp = null; it.note = ""; } it.st = u; }
   });
 }
@@ -552,6 +566,8 @@ async function lerArquivos(files) {
   const lista = [], prints = [];
   for (const f of files) {
     const ehPdf = /\.pdf$/i.test(f.name || "") || f.type === "application/pdf";
+    { const b0 = await lerBuffer(f), h0 = await sha256(b0), igual = h0 && [...(S.pend ? S.pend.arquivos : []), ...lista].find(x => x.hash === h0);
+      if (igual) { lista.push({ nome: f.name, hash: null, formato: (f.name.split(".").pop() || "").toUpperCase(), erro: `Este é o mesmo arquivo de “${igual.nome}”, que já está nesta importação. A cópia foi ignorada para não duplicar lançamentos.`, raw: [], itens: [], ignorados: 0 }); continue; } }
     if (ehImagem(f) || ehPdf) {
       const buf = await lerBuffer(f), hash = await sha256(buf);
       const a = { nome: f.name, hash, formato: ehPdf ? "PDF" : "PRINT", img: true, pdf: ehPdf, arquivo: ehPdf ? f : null, lendo: true, progresso: 0, raw: [], itens: [], ignorados: 0, colunas: null, preview: URL.createObjectURL(f) };
@@ -566,7 +582,7 @@ async function lerArquivos(files) {
     lista.push(a);
   }
   if (!S.pend) S.pend = { arquivos: [] };
-  S.pend.arquivos.push(...lista); ui.impDone = null; render();
+  S.pend.arquivos.push(...lista); reanalisa(); ui.impDone = null; render();
   const ok = lista.filter(a => !a.erro && !a.img).length; if (ok || !prints.length) toast(ok ? `${ok} arquivo${ok > 1 ? "s" : ""} lido${ok > 1 ? "s" : ""}. Revise antes de gravar.` : "Nenhum arquivo pôde ser lido.");
   for (const [a, f] of prints) await (a.pdf ? lerPDF(a, f) : lerPrint(a, f));
 }
@@ -806,6 +822,39 @@ function pagarFatModal(arg) {
 
 // ================= AÇÕES =================
 function lancar(o) { o.id = uid("l"); o.origem = o.origem || "manual"; S.lanc.push(o); return o; }
+const chaveDupOk = () => "caixa-dupok-" + (FAM ? FAM.id : "");
+const dupIgnorados = () => { try { return new Set(JSON.parse(localStorage.getItem(chaveDupOk()) || "[]")); } catch (e) { return new Set(); } };
+// ---------- duplicados já gravados: mesmo cartão/conta, mesma data, mesmo valor (±1%) e descrição parecida ou valor idêntico ----------
+function gruposDuplicados() {
+  const grupos = [];
+  const junta = (its, onde) => {
+    const pai = its.map((_, i) => i), raiz = i => pai[i] === i ? i : (pai[i] = raiz(pai[i]));
+    for (let i = 0; i < its.length; i++) for (let j = i + 1; j < its.length; j++) {
+      const a = its[i], b = its[j]; if (a.d !== b.d || a.tipo !== b.tipo) continue;
+      const dv = Math.abs(a.v - b.v); if (dv > Math.max(8, Math.round(a.v * 0.01))) continue;
+      if (dv <= 1 || parecido(a.desc, b.desc)) pai[raiz(j)] = raiz(i);
+    }
+    const m = {}; its.forEach((x, i) => (m[raiz(i)] = m[raiz(i)] || []).push(x));
+    for (const g of Object.values(m)) if (g.length > 1) {
+      // igual de verdade: mesmo valor, mesmo dia e descrição parecida com o primeiro → sugerido para excluir
+      g.forEach((x, i) => { x.sugere = i > 0 && Math.abs(x.v - g[0].v) <= 1 && parecido(x.desc, g[0].desc) && (x.n || 0) === (g[0].n || 0); });
+      const sig = g.map(x => x.ref).sort().join(",");
+      if (!dupIgnorados().has(sig)) grupos.push({ onde, d: g[0].d, v: g[0].v, itens: g, sig });
+    }
+  };
+  for (const c of S.cartoes) {
+    const its = [];
+    for (const l of S.lanc) if (l.cartao === c.id && !l.excluido && (l.tipo === "despesa" || l.tipo === "estorno")) its.push({ ref: "l:" + l.id, d: l.data, desc: l.desc, v: l.valor, tipo: l.tipo, n: 0, imp: l.imp, rot: l.tipo === "estorno" ? "estorno" : "compra" });
+    for (const p of S.parc) if (p.cartao === c.id) its.push({ ref: "p:" + p.id, d: p.data, desc: p.desc, v: parcVal(p, 2), tipo: "despesa", n: p.n, imp: p.imp, rot: `parcelado em ${p.n}× (${fmt(p.total)})` });
+    junta(its, c.nome);
+  }
+  for (const c of S.contas) {
+    const its = [];
+    for (const l of S.lanc) if (l.conta === c.id && !l.cartao && !l.excluido && (l.tipo === "despesa" || l.tipo === "receita")) its.push({ ref: "l:" + l.id, d: l.data, desc: l.desc, v: l.valor, tipo: l.tipo, n: 0, imp: l.imp, rot: l.tipo === "receita" ? "entrada" : "saída" });
+    junta(its, c.nome);
+  }
+  return grupos.sort((a, b) => a.d < b.d ? 1 : -1);
+}
 const forms = {
   novo(f) {
     const tipo = f.elements.tipo.value, valor = parseBRL(f.elements.valor.value), data = f.elements.data.value, desc = f.elements.desc.value.trim();
@@ -1144,6 +1193,14 @@ Object.assign(acts, {
   impcartoes: fi => { const a = S.pend.arquivos[+fi]; a.escolher = !a.escolher || !a.destino; render(); },
   impvincular: arg => { const [fi, id] = arg.split("|"), a = S.pend.arquivos[+fi]; a.destino = id; a.escolher = false; const c = cardOf(S, id); a.fatura = c ? adivinhaFatura(c, a.raw, a.vencDoc) : null; reanalisa(a); render(); toast("Vinculado a " + nomeDe(id) + (c ? ", fatura de " + ymLong(a.fatura) + ". Confira a fatura acima." : ".")); },
   impsenha: fi => { const a = S.pend.arquivos[+fi], i = document.getElementById("pdfsenha-" + fi), senha = i ? i.value : ""; if (!senha) return toast("Digite a senha do PDF."); Object.assign(a, { erro: null, lendo: true, progresso: 0 }); render(); lerPDF(a, a.arquivo, senha); },
+  dupver: () => {
+    const g = gruposDuplicados(); if (!g.length) return toast("Nenhum duplicado encontrado.");
+    const n = g.reduce((t, x) => t + x.itens.filter(i => i.sugere).length, 0);
+    modal("Revisar lançamentos duplicados", `<form class="form" data-form="dupsel"><div class="full"><p class="note">Cada grupo tem lançamentos do mesmo cartão ou conta, no mesmo dia e com o mesmo valor. Já deixei marcadas as <b>cópias idênticas</b> (${n}); confira e desmarque o que for compra de verdade. O primeiro de cada grupo fica.</p></div>
+      <div class="full dup-lista">${g.map((x, gi) => `<fieldset class="dup-g"><legend><b>${esc(x.onde)}</b> · ${br(x.d)} · ${fmt(x.v)} <button type="button" class="linkbtn" data-act="dupok" data-arg="${gi}">São compras diferentes</button></legend>${x.itens.map((i, ii) => `<label class="dup-i"><input type="checkbox" name="x" value="${i.ref}" ${i.sugere ? "checked" : ""} ${ii === 0 ? 'data-primeiro="1"' : ""}><span><b>${esc(i.desc)}</b><span class="sub">${i.rot}${i.imp ? " · importação " + esc(i.imp) : " · lançado à mão"}${ii === 0 ? " · fica" : ""}</span></span><span class="num">${fmt(i.v)}</span></label>`).join("")}</fieldset>`).join("")}</div>
+      <div class="full row-actions"><button class="btn danger">Excluir os marcados</button><button type="button" class="btn" data-close>Cancelar</button></div></form>`, true);
+  },
+  dupok: gi => { const g = gruposDuplicados()[+gi]; if (!g) return; const s0 = dupIgnorados(); s0.add(g.sig); try { localStorage.setItem(chaveDupOk(), JSON.stringify([...s0])); } catch (e) {} audit("Marcou como compras diferentes", g.onde, br(g.d) + " · " + fmt(g.v)); closeLayer(); render(); if (gruposDuplicados().length) acts.dupver(); else toast("Pronto: nenhum outro duplicado para revisar."); },
   impverprint: fi => { const a = S.pend.arquivos[+fi]; a.verPrint = !a.verPrint; render(); },
   impremover: k => { const [fi, i] = k.split(":").map(Number), a = S.pend.arquivos[fi]; a.raw.splice(i, 1); reanalisa(a); render(); },
   impadd: fi => { const a = S.pend.arquivos[+fi]; a.raw.push({ d: a.raw.length ? a.raw[a.raw.length - 1].d : TODAY, desc: "", vs: 0, fitid: null }); reanalisa(a); render(); const ins = document.querySelectorAll(`[data-impimg^="${fi}:${a.raw.length - 1}:desc"]`); if (ins[0]) ins[0].focus(); },
@@ -1183,6 +1240,16 @@ Object.assign(forms, {
   mfaok: authForm(async f => { const { error } = await SB.auth.mfa.challengeAndVerify({ factorId: ui.enroll.id, code: f.elements.code.value.trim() }); if (error) throw error; ui.enroll = null; ui.fatores = null; audit("Ativou verificação em duas etapas", ME.email); return "Verificação em duas etapas ativada."; }),
   apagar: async f => { if (f.elements.conf.value !== "APAGAR") { toast("Digite APAGAR para confirmar."); return false; } closeLayer(); const n = vazio(ME.nome, FAM.inicio); n.categorias = S.categorias; n.regras = S.regras; n.pessoas = S.pessoas; await substituirDados(n, "Apagou todos os dados financeiros"); return "Dados financeiros apagados."; },
   convite: async f => { const email = f.elements.email.value.trim().toLowerCase(), nome = f.elements.nome.value.trim(); if (ui.membros.some(m => m.email.toLowerCase() === email)) { toast("Essa pessoa já tem acesso."); return false; } const { data, error } = await SB.from("convites").insert({ familia_id: FAM.id, email, nome, papel: f.elements.acesso.value }).select().single(); if (error) { toast("Erro: " + error.message); return false; } ui.convites.push(data); if (!S.pessoas.some(p => norm(p.nome) === norm(nome))) S.pessoas.push({ id: uid("ps"), nome, acesso: "Convidado", login: email }); audit("Convidou pessoa", nome, email); return `Convite criado. Envie o endereço ${URL_APP()} para ${nome}.`; },
+  dupsel: f => {
+    const refs = [...f.querySelectorAll("input[name=x]:checked")].map(i => i.value); if (!refs.length) { toast("Nenhum lançamento marcado."); return false; }
+    let nl = 0, np = 0, tot = 0;
+    for (const r of refs) {
+      const [t, id] = r.split(":");
+      if (t === "l") { const l = S.lanc.find(x => x.id === id); if (l && !l.excluido) { l.excluido = true; nl++; tot += l.valor; audit("Excluiu lançamento duplicado", l.desc, fmt(l.valor) + " · " + br(l.data), id); } }
+      else { const p = S.parc.find(x => x.id === id); if (p) { S.parc = S.parc.filter(x => x.id !== id); np++; tot += p.total; audit("Excluiu parcelamento duplicado", p.desc, `${p.n}× · ${fmt(p.total)}`, id); } }
+    }
+    return `${nl + np} duplicado${nl + np === 1 ? "" : "s"} excluído${nl + np === 1 ? "" : "s"} (${fmt(tot)}).`;
+  },
   novapessoa: f => { const nome = f.elements.nome.value.trim(); if (S.pessoas.some(p => norm(p.nome) === norm(nome))) { toast("Já existe."); return false; } S.pessoas.push({ id: uid("ps"), nome, acesso: "Sem login", login: "" }); audit("Adicionou responsável", nome); return "Responsável adicionado."; },
   novaconta: f => { const E = f.elements, v = parseBRL(E.saldo.value) || 0, id = f.dataset.id;
     if (id) { const c = S.contas.find(x => x.id === id); Object.assign(c, { nome: E.nome.value.trim(), tipo: E.tipo.value, inst: E.inst.value.trim(), resp: E.resp.value, caixa: E.caixa.checked, saldoIni: v, dataIni: E.data.value }); audit("Editou conta", c.nome); return "Conta atualizada."; }

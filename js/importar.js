@@ -199,13 +199,48 @@ function faturaMaisProxima(S, card, valor) {
   return [...r.abertas].sort((a, b) => Math.abs(a.saldo - valor) - Math.abs(b.saldo - valor))[0];
 }
 
-// analisa os itens lidos de um arquivo para um destino (conta ou cartão)
-function analisar(S, itens, destino, faturaKey) {
+// ---------- duplicidade: cada linha importada é comparada com o que já está gravado, com as parcelas já
+// projetadas e com as linhas dos OUTROS arquivos desta mesma importação (CSV + PDF da mesma fatura, por exemplo).
+// Cada registro existente só "absorve" uma linha nova (compras iguais de verdade continuam entrando).
+// forte: mesmo valor, mesma data (±2 dias), descrição parecida e mesma parcela → "já registrado", não grava
+// médio: valor quase igual e data próxima, ou mesma compra com nome/parcela lidos diferente → "possível duplicata", você decide
+function candidatosDup(S, destino, extras) {
+  const card = cardOf(S, destino), cands = [];
+  for (const l of S.lanc) {
+    if (l.excluido) continue;
+    if (card ? l.cartao !== destino : l.conta !== destino && l.destino !== destino) continue;
+    const ap = achaParcela(l.desc || "");
+    cands.push({ d: l.data, desc: l.desc, v: l.valor, tipo: l.tipo, n: ap ? ap.n : 0, key: card ? l.fatura || keyOf(card, l.data) : null, rot: l.imp ? "importação " + l.imp : "lançado à mão" });
+  }
+  if (card) for (const p of S.parc) if (p.cartao === destino && !p.cancelDe) cands.push({ d: p.data, desc: p.desc, v: parcVal(p, 2), v1: parcVal(p, 1), tipo: "despesa", n: p.n, key: null, rot: p.imp ? "parcelamento da importação " + p.imp : "parcelamento cadastrado" });
+  for (const e of extras || []) cands.push(e);
+  return cands;
+}
+function achaIgual(cands, usados, v, d, desc, n, key, tipo) {
+  let best = null, bs = -1e9;
+  cands.forEach((c, i) => {
+    if (usados.has(i)) return;
+    if (tipo && c.tipo && c.tipo !== tipo && !(c.tipo === "transferencia" && tipo !== "receita")) return;
+    const dv = Math.min(Math.abs(c.v - v), c.v1 !== undefined ? Math.abs(c.v1 - v) : 1e12), tol = Math.max(8, Math.round(v * 0.01));
+    if (dv > tol) return;
+    const exato = dv <= 1, dd = d && c.d ? diasEntre(d, c.d) : 99, par = parecido(c.desc || "", desc || ""), nOk = (n || 0) === (c.n || 0), mesmaFat = !!(key && c.key && key === c.key);
+    const forte = exato && par && nOk && dd <= 2;
+    const medio = forte || dd <= 3 || (exato && par && (dd <= 10 || mesmaFat));
+    if (!medio) return;
+    const sc = (forte ? 1000 : 0) + (exato ? 50 : 0) + (par ? 30 : 0) + (nOk ? 10 : 0) + (mesmaFat ? 5 : 0) - Math.min(dd, 60);
+    if (sc > bs) { bs = sc; best = { i, c, forte }; }
+  });
+  return best;
+}
+const notaIgual = (ig, extra = "") => `${ig.forte ? "Já registrado" : "Parecido com"}: “${ig.c.desc}” de ${ig.c.d ? brs(ig.c.d) : "?"}, ${fmt(ig.c.v)}${ig.c.n ? ` (parcelado em ${ig.c.n}×)` : ""} · ${ig.c.rot}${ig.forte ? ". Não será gravado de novo." : ". É a mesma compra?"}${extra}`;
+
+// analisa os itens lidos de um arquivo para um destino (conta ou cartão); extras = linhas de outros arquivos desta importação
+function analisar(S, itens, destino, faturaKey, extras = []) {
   const card = cardOf(S, destino), conta = S.contas.find(c => c.id === destino);
   const desp = catsDespesa(S), outrasD = desp.includes("Outras despesas") ? "Outras despesas" : desp[0] || "", outrasR = catsReceita(S)[0] || "";
   const existentes = S.lanc.filter(l => !l.excluido && (card ? l.cartao === destino : l.conta === destino || l.destino === destino));
   const ativos = conta ? compromissos(S, addYM(CUR, -2), addYM(CUR, 1)).filter(c => ativo(c) && c.kind !== "fat" && c.restante > 0) : [];
-  const usados = new Set();
+  const usados = new Set(), cands = candidatosDup(S, destino, extras), usadosDup = new Set();
   return itens.map(it => {
     const o = { d: it.d, desc: it.desc, v: Math.abs(it.vs), fitid: it.fitid, alvo: destino, st: "ok", note: "", tipo: "despesa", fat: card && it.fat ? it.fat : null };
     if (it.fitid && existentes.some(l => l.fitid === it.fitid)) return { ...o, st: "link", note: "Já importado antes (mesmo identificador do banco)" };
@@ -213,18 +248,20 @@ function analisar(S, itens, destino, faturaKey) {
     if (card) {
       if (it.vs < 0) {
         if (/PAGAMENTO|PGTO|PAG FAT|PAGTO/i.test(norm(it.desc))) return { ...o, st: "skip", orig: "info", note: "Pagamento da fatura: é registrado a partir do extrato da conta" };
+        const igE = achaIgual(cands, usadosDup, o.v, it.d, it.desc, 0, null, "estorno");
+        if (igE && igE.forte) { usadosDup.add(igE.i); return { ...o, tipo: "estorno", st: "link", dupAuto: true, cat: sug ? sug.cat : outrasD, note: notaIgual(igE) }; }
         const orig = existentes.find(l => l.tipo === "despesa" && l.valor === o.v && parecido(l.desc, it.desc));
         return { ...o, tipo: "estorno", st: "estorno", cat: orig ? orig.cat : sug ? sug.cat : outrasD, sub: orig ? orig.sub : "", estornoDe: orig ? orig.id : null, note: orig ? `Estorno da compra de ${brs(orig.data)}` : "Crédito na fatura (estorno), sem compra original encontrada" };
       }
       const pc = it.parc ? { k: it.parc.k, n: it.parc.n, limpa: it.desc } : achaParcela(it.desc);
       if (pc) {
-        const ex = S.parc.find(p => p.cartao === destino && p.n === pc.n && Math.abs(parcVal(p, 2) - o.v) <= 1 && parecido(p.desc, pc.limpa || it.desc));
-        if (ex) return { ...o, st: "link", note: `Parcela ${pc.k}/${pc.n} de “${ex.desc}” já projetada · não será recriada` };
-        const base = it.fat || faturaKey || keyOf(card, it.d);
+        const base = it.fat || faturaKey || (it.d ? keyOf(card, it.d) : faturaKey);
+        const ig = achaIgual(cands, usadosDup, o.v, it.d, pc.limpa || it.desc, pc.n, base, "despesa");
+        if (ig) { usadosDup.add(ig.i); if (ig.forte) return { ...o, st: "link", dupAuto: true, n: pc.n, k: pc.k, cat: sug ? sug.cat : outrasD, note: `Parcela ${pc.k}/${pc.n} · ` + notaIgual(ig) }; return { ...o, st: "dup", n: pc.n, k: pc.k, desc: pc.limpa || it.desc, k0: addYM(base, -(pc.k - 1)), cat: sug ? sug.cat : outrasD, sub: sug ? sug.sub : "", note: `Parcela ${pc.k}/${pc.n} · ` + notaIgual(ig) }; }
         return { ...o, st: "parc", n: pc.n, k: pc.k, desc: pc.limpa || it.desc, k0: addYM(base, -(pc.k - 1)), cat: sug ? sug.cat : outrasD, sub: sug ? sug.sub : "", note: `Parcela ${pc.k}/${pc.n} encontrada: cria parcelamento de ${pc.n} × ${fmt(o.v)} = ${fmt(o.v * pc.n)}, 1ª na fatura de ${ymLabel(addYM(base, -(pc.k - 1)))}` };
       }
-      const dup = existentes.find(l => (l.tipo === "despesa") && l.valor === o.v && diasEntre(l.data, it.d) <= 2 && parecido(l.desc, it.desc));
-      if (dup) return { ...o, st: "dup", cat: dup.cat, note: `Parecido com “${dup.desc}” de ${brs(dup.data)}, já registrado` };
+      const ig = achaIgual(cands, usadosDup, o.v, it.d, it.desc, 0, it.fat || faturaKey || (it.d ? keyOf(card, it.d) : null), "despesa");
+      if (ig) { usadosDup.add(ig.i); return { ...o, st: ig.forte ? "link" : "dup", dupAuto: ig.forte || undefined, cat: sug && sug.cat !== "Transferência" ? sug.cat : outrasD, sub: sug ? sug.sub : "", note: notaIgual(ig) }; }
       return { ...o, cat: sug && sug.cat !== "Transferência" ? sug.cat : outrasD, sub: sug ? sug.sub : "", note: [o.fat ? `Fatura de ${ymLabel(o.fat)}` : "", sug ? `Categoria pela regra “${sug.regra}”` : ""].filter(Boolean).join(" · ") };
     }
     // conta bancária
@@ -237,8 +274,8 @@ function analisar(S, itens, destino, faturaKey) {
       return { ...o, tipo: "transferencia", cat: "Transferência", cartaoDestino: c.id, fatura: f ? f.key : keyOf(c, it.d), note: `Pagamento de fatura → transferência para ${c.nome}${f ? ", fatura de " + ymLabel(f.key) : ""}. Não conta como despesa.` };
     }
     const tipo = it.vs < 0 ? "despesa" : "receita";
-    const dup = existentes.find(l => (l.tipo === tipo || l.tipo === "transferencia") && l.valor === o.v && diasEntre(l.data, it.d) <= 2 && (parecido(l.desc, it.desc) || l.tipo === "transferencia"));
-    if (dup) return { ...o, tipo, st: "dup", cat: dup.cat || "", note: `Parecido com “${dup.desc}” de ${brs(dup.data)}, já registrado` };
+    const ig = achaIgual(cands, usadosDup, o.v, it.d, it.desc, 0, null, tipo);
+    if (ig) { usadosDup.add(ig.i); const cs = tipo === "receita" ? catsReceita(S) : desp; return { ...o, tipo, st: ig.forte ? "link" : "dup", dupAuto: ig.forte || undefined, cat: sug && cs.includes(sug.cat) ? sug.cat : tipo === "receita" ? outrasR : outrasD, sub: sug ? sug.sub : "", note: notaIgual(ig) }; }
     const comp = ativos.find(c => !usados.has(c.key) && c.tipo === tipo && (c.restante === o.v || (c.estimado && Math.abs(c.restante - o.v) <= c.restante * 0.2)) && diasEntre(c.venc, it.d) <= 6);
     if (comp) { usados.add(comp.key); return { ...o, tipo, st: "comp", comp: comp.key, cat: comp.cat, sub: comp.sub, note: `${tipo === "receita" ? "Recebe" : "Quita"} “${comp.desc}” (previsto ${fmt(comp.restante)}, vence ${brs(comp.venc)})` }; }
     const cats = tipo === "receita" ? catsReceita(S) : desp;
@@ -248,4 +285,4 @@ function analisar(S, itens, destino, faturaKey) {
 const catsDespesa = S => S.categorias.filter(c => c[1] !== "receita").map(c => c[0]);
 const catsReceita = S => S.categorias.filter(c => c[1] === "receita").map(c => c[0]);
 
-if (typeof module !== "undefined") module.exports = { lerParcela, lerTextoImagem, dataDaLinha, parseCSV, parseOFX, parseValor, parseDataBR, lerArquivo, analisar, achaParcela, parecido, IMP_PEND, IMP_GRAVA };
+if (typeof module !== "undefined") module.exports = { candidatosDup, achaIgual, lerParcela, lerTextoImagem, dataDaLinha, parseCSV, parseOFX, parseValor, parseDataBR, lerArquivo, analisar, achaParcela, parecido, IMP_PEND, IMP_GRAVA };
