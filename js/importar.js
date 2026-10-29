@@ -88,7 +88,7 @@ function dataDaLinha(L, hoje) {
   return null;
 }
 // valor no formato brasileiro (exige vírgula com 2 casas para não confundir com datas e parcelas)
-const VALOR_IMG = /([+\-−–—](?=R|\d))?(?:R\s?\$\s*)?([+\-−–—](?=\d))?(?<![\d\/])(\d{1,3}(?:\.\d{3})*,\d{2})(?!\d)/g;
+const VALOR_IMG = /([+\-−–—](?=R|\d))?(?:R\s?\$\s*)?([+\-−–—](?=\d))?(?<![\d\/])(\d{1,3}(?:\.\d{3})*,\d{2})(?!\d)(?!\s*%)/g;
 // data em qualquer lugar da linha (dd/mm/aaaa, dd/mm/aa ou dd/mm)
 const DATA_IMG = /(?<![\d\/])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d\/])/g;
 // parcela "07/08", "Parcela 2 de 10", "Parc 3/12" (sem ano: não é data)
@@ -105,9 +105,11 @@ const isoDe = (d, m, y, hoje) => y ? `${y.length === 2 ? "20" + y : y}-${pad(+m)
 const dataValida = (d, m) => +d >= 1 && +d <= 31 && +m >= 1 && +m <= 12;
 function limpaDesc(t) {
   return String(t || "").replace(/\*\s+/g, "*").replace(/\bR\s?\$\s*/gi, " ").replace(/(?<![\d\/])\d{1,2}\/\d{1,2}\/(\d{4}|\d{2})(?![\d\/])/g, " ")
-    .replace(/[|]+/g, " ").replace(/\s+/g, " ").replace(/^[\s\-–—−•·:.,;]+|[\s\-–—−•·:.,;+]+$/g, "").replace(/\s+[\-–—−]\s*$/, "").trim();
+    .replace(/[|]+/g, " ").replace(/[(\[]\s*[)\]]/g, " ").replace(/\s+/g, " ").replace(/^[\s\-–—−•·:.,;]+|[\s\-–—−•·:.,;+]+$/g, "").replace(/\s+[\-–—−]\s*$/, "").trim();
 }
-function lerTextoImagem(texto, hoje = TODAY) {
+const QUADRO_IMG = /\b(PROXIMA FATURA|PROXIMAS FATURAS|DEMAIS FATURAS|TOTAL PARCELADO|COMPRAS|SAQUE|CREDITO ROTATIVO|ROTATIVO|PARCELAMENTO DE FATURA|MULTA|MORA|TAXA|ANUIDADE TOTAL|CUSTO EFETIVO|DISPONIVEL|UTILIZADO|PAGAMENTO MINIMO|SALDO ANTERIOR|SALDO DESTA FATURA|LANCAMENTOS NO CARTAO)\b/;
+// opcoes.exigeData: documento (PDF) — só é lançamento a linha que tem data de compra
+function lerTextoImagem(texto, hoje = TODAY, opcoes = {}) {
   const brutas = String(texto || "").split(/\r?\n/).map(l => l.replace(/[_“”"'`~]+/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
   const N = norm(brutas.join(" \n "));
   const NB = N.replace(/\b[A-Z0-9]{2,}\s?\*\s?\S*/g, " "); // "PICPAY*LOJA", "MP *LOJA" são lojas, não o banco do cartão
@@ -132,13 +134,14 @@ function lerTextoImagem(texto, hoje = TODAY) {
       continue;
     }
     if (RESUMO_IMG.test(L) && !/[A-Z]{3,}.*\d{1,2}\/\d{1,2}/.test(L.replace(RESUMO_IMG, ""))) { descPend = ""; ignorados++; continue; }
+    if (!dt && QUADRO_IMG.test(L)) { descPend = ""; ignorados++; continue; } // "Próxima fatura R$ 361,12", "Compras R$ 3.500,00", encargos
     { const pw = L.match(PARC_PALAVRA), ult = itens[itens.length - 1];
       if (pw && !dt && ult && ultimaLinhaItem && !ult.parc && !/[A-Z]{4,}/.test(L.replace(PARC_PALAVRA, "").replace(/\b(DE|EM|R)\b/g, "")) && +pw[1] >= 1 && +pw[2] >= 2 && +pw[1] <= +pw[2]) { ult.parc = { k: +pw[1], n: +pw[2] }; ultimaLinhaItem = false; continue; } }
     const vm = valores[valores.length - 1];
     const v = parseValor(vm[3]); if (!(v > 0)) { ignorados++; continue; }
     const antes = L.slice(0, vm.index), depois = L.slice(vm.index + vm[0].length);
     const sinal = vm[1] || vm[2] || ""; // só vale sinal colado no valor ("−R$ 800,00", "-150,00"); "— R$" é borda de tabela
-    const neg = /[\-−–—]/.test(sinal) || /\b(ESTORNO|CREDITO|PAGAMENTO RECEBIDO|DEVOLUCAO)\b/.test(L);
+    const neg = /[\-−–—]/.test(sinal) || /^\s*[\-−–—](?!\s*\d)/.test(L.slice(vm.index + vm[0].length)) || /\b(ESTORNO|CREDITO|PAGAMENTO RECEBIDO|DEVOLUCAO)\b/.test(L);
     // vencimento: data depois do valor (coluna "Vencimento") → fatura daquele mês
     let venc = null, parcDepois = null;
     const pwd = depois.match(PARC_PALAVRA); if (pwd && +pwd[1] >= 1 && +pwd[2] >= 2 && +pwd[1] <= +pwd[2]) parcDepois = { k: +pwd[1], n: +pwd[2] };
@@ -165,6 +168,7 @@ function lerTextoImagem(texto, hoje = TODAY) {
     if (!parc) { const pd = norm(desc).match(PARC_PALAVRA); if (pd && +pd[1] >= 1 && +pd[2] >= 2 && +pd[1] <= +pd[2]) { parc = { k: +pd[1], n: +pd[2] }; desc = limpaDesc(desc.replace(new RegExp(PARC_PALAVRA.source, "i"), " ")); } } // "Parcela 1 de 2" na linha de cima
     descPend = "";
     if (!d && !dt) d = dataAtual; // prints agrupados por dia ("20 OUT"); em tabela fica em branco para preencher
+    if (!d && opcoes.exigeData) { descPend = ""; ignorados++; continue; } // PDF: sem data de compra não é lançamento
     if (!desc && !d) { ignorados++; continue; } // linha de total sem descrição
     itens.push({ d: d || "", desc: desc.slice(0, 120), vs: neg ? -v : v, fitid: null, parc, venc, fat: venc ? venc.slice(0, 7) : null });
     ultimaLinhaItem = true;

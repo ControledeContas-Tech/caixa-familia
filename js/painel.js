@@ -35,6 +35,36 @@ div.kpi{cursor:default}
 .form .pf-opc input[type=radio]{width:auto;flex:none;margin:0;padding:0}
 .pf-opc label:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
 .pf-datas{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pf-geral{display:flex;justify-content:space-between;align-items:center;gap:10px 16px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 14px;margin-bottom:14px}
+.pf-geral-t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pf-geral-t svg{width:16px;height:16px}
+.pf-geral-b{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pf-rot{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--muted);white-space:nowrap;letter-spacing:0;text-transform:none;font-weight:500}
+.pf-rot svg{width:12px;height:12px}
+.corte .cm-chart{max-width:760px}
+.cm-row{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(300px,1fr);gap:12px;overflow-x:auto;padding-bottom:6px;margin-top:12px;scroll-snap-type:x proximity}
+.cm{border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--surface);scroll-snap-align:start;min-width:0}
+.cm.atual{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.cm.passado{background:var(--bg)}
+.cm header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.cm header b{font-size:15px}
+.cm-n{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.cm-n div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cm-n span{font-size:11.5px;color:var(--muted)}
+.cm-n b{font:500 15px/1.2 var(--f-num);font-variant-numeric:tabular-nums}
+.cm .pos{color:var(--good)} .cm .neg{color:var(--crit)}
+.cm-pago .bar{height:6px;background:var(--sunken);border-radius:99px;overflow:hidden;margin-bottom:4px}
+.cm-pago .bar i{display:block;height:100%;background:var(--good)}
+.cm-g{border-top:1px solid var(--line);padding-top:6px}
+.cm-g summary{display:grid;grid-template-columns:1fr auto;gap:2px 8px;cursor:pointer;font-size:13px;align-items:baseline}
+.cm-g summary .cm-f,.cm-g summary .cm-ok{grid-column:2;justify-self:end;font-size:11.5px}
+.cm-f{color:var(--crit)} .cm-f.in{color:var(--info)} .cm-ok{color:var(--good)}
+.cm-li{display:grid;grid-template-columns:42px 1fr auto;gap:2px 8px;font-size:12.5px;padding:4px 0;align-items:center}
+.cm-li .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cm-li .pill{grid-column:2/4;justify-self:end;font-size:10.5px}
+.cm footer{display:flex;justify-content:space-between;align-items:baseline;gap:8px;border-top:1px dashed var(--line);padding-top:8px;font-size:12.5px}
+.cm footer b{font:600 15px var(--f-num)}
+.cm footer.neg{color:var(--crit)}
 .an-barra{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .an-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .an-card{margin:0}
@@ -56,6 +86,7 @@ div.kpi{cursor:default}
     ate_prox: ["Até o fim do próximo mês (com atrasadas)", () => [null, fimMes(addYM(CUR, 1))]],
     d30: ["Próximos 30 dias", () => [TODAY, addDays(TODAY, 30)]],
     u30: ["Últimos 30 dias", () => [addDays(TODAY, -30), TODAY]],
+    tri: ["Este mês e os próximos 2", () => [iniMes(CUR), fimMes(addYM(CUR, 2))]],
     m2: ["Mês passado e este", () => [iniMes(addYM(CUR, -1)), fimMes(CUR)]],
     m3: ["Últimos 3 meses", () => [iniMes(addYM(CUR, -2)), fimMes(CUR)]],
     m6: ["Últimos 6 meses", () => [iniMes(addYM(CUR, -5)), fimMes(CUR)]],
@@ -113,12 +144,27 @@ div.kpi{cursor:default}
     else if (ini && !fim) rot = "desde " + br(ini).slice(0, 5);
     else if (ini.slice(8) === "01" && fim === fimMes(ymOf(fim))) rot = ymOf(ini) === ymOf(fim) ? cm(ini) : cm(ini).slice(0, 3) + "–" + cm(fim);
     else rot = br(ini).slice(0, 5) + " a " + br(fim).slice(0, 5);
-    const texto = p === "tudo" ? "em todo o período" : p === "atual" ? "na fatura atual" : !ini ? "até " + br(fim) + " (inclui atrasadas)" : "de " + br(ini) + " a " + br(fim);
+    const texto = p === "tudo" ? "em todo o período" : p === "atual" ? "na fatura atual" : !ini ? "até " + br(fim) + " (inclui atrasadas)" : !fim ? "a partir de " + br(ini) : "de " + br(ini) + " a " + br(fim);
     return { ini, fim, atual: p === "atual", tudo: p === "tudo", rot, texto };
   }
-  const pfDe = key => { const [t, pad] = Q[key]; return resolve(t, pfMapa()[key] || { p: pad }); };
+  // ---------- filtro geral do Painel: um único período vale para todos os quadros ----------
+  const chaveG = () => "caixa-pfg-" + (ME ? ME.id : "anon");
+  let G0 = null;
+  const gConf = () => { if (!G0 || G0._k !== chaveG()) { let c = null; try { c = JSON.parse(localStorage.getItem(chaveG()) || "null"); } catch (e) {} G0 = Object.assign(c && PER[c.p] && c.p !== "atual" ? c : { p: "mes" }, { _k: chaveG() }); } return G0; };
+  const gGravar = c => { const { _k, ...r } = c; G0 = { ...r, _k: chaveG() }; try { localStorage.setItem(chaveG(), JSON.stringify(r)); } catch (e) {} };
+  const gDe = () => resolve("per", gConf());
+  // como cada quadro lê o período geral: posição na data final, tudo até o fim (com atrasadas), dentro do período, ou depois dele
+  const SEM = { caixa: "data", patr: "data", aneg: "data", comp: "ate", pend: "ate", cartoes: "ate", prox: "ate", receitas: "per", pago: "per", divs: "per", fat: "per", ccards: "per", gcat: "per", rxg: "per", futuras: "depois" };
+  function pfDe(key) {
+    const g = gDe(), sem = SEM[key] || "per";
+    if (sem === "data") { const data = g.fim && g.fim < TODAY ? g.fim : TODAY; return resolve("data", data === TODAY ? { p: "hoje" } : { p: "custom", data }); }
+    if (g.tudo) return g;
+    if (sem === "ate") return resolve("per", { p: "custom", ini: null, fim: g.fim });
+    if (sem === "depois") return resolve("per", { p: "custom", ini: addDays(g.fim, 1), fim: null });
+    return g;
+  }
   const chip = (act, arg, r, on) => `<button class="pf ${on ? "on" : ""}" data-act="${act}" data-arg="${arg}" title="Mudar o período deste quadro">${icon("cal")}${esc(r.rot)}</button>`;
-  const qchip = key => chip("pf", key, pfDe(key), !!pfMapa()[key]);
+  const qchip = key => `<span class="pf-rot" title="Período do filtro geral do Painel">${icon("cal")}${esc(pfDe(key).rot)}</span>`;
 
   // ---------- cálculos com período ----------
   const dentro = (r, d) => !!d && (!r.ini || d >= r.ini) && (!r.fim || d <= r.fim);
@@ -160,11 +206,68 @@ div.kpi{cursor:default}
     const m = M[key](pfDe(key));
     return `<div class="si ${cls}"><div class="si-top"><span>${titulo}</span>${qchip(key)}</div><button class="si-v" ${act}><b class="num">${fmt(m.v)}</b>${extra ? `<span class="sub"> ${extra(m)}</span>` : ""}</button></div>`;
   }
+  // ---------- CORTE MENSAL: em cada mês, o que entra, o que sai, o que já foi pago, o que falta e quanto sobra ----------
+  const GRUPOS = [["fat", "Faturas de cartão"], ["rec", "Contas fixas"], ["div", "Dívidas em pagamento"], ["man", "Contas avulsas"]];
+  const FORA = ["cancelada", "reagendada", "renegociada"];
+  function corteDoMes(ym, pagosLanc) {
+    const ini0 = ymOf(S.inicio), cs = ym >= ini0 ? compromissos(S, ym, ym) : [];
+    const rec = cs.filter(c => c.tipo === "receita" && c.status !== "cancelada");
+    const desp = cs.filter(c => c.tipo === "despesa" && !FORA.includes(c.status));
+    const atrasadas = ym === CUR && ini0 < CUR ? compromissos(S, ini0, addYM(CUR, -1)).filter(c => c.tipo === "despesa" && ativo(c) && c.restante > 0) : [];
+    // gastos que já saíram da conta fora dos compromissos (débito, Pix, dinheiro)
+    const avulsos = S.lanc.filter(l => !l.excluido && l.tipo === "despesa" && l.conta && !l.cartao && ymOf(l.data) === ym && !pagosLanc.has(l.id) && !String(l.conta).startsWith("inv"));
+    const recebido = receitasMes(S, ym), aReceber = sum(rec.filter(ativo), c => Math.max(0, c.restante));
+    const totalComp = sum(desp, c => c.valor - (c.desconto || 0)), pagoComp = sum(desp, c => c.pago), gastoAvulso = sum(avulsos, l => l.valor);
+    const faltaAtras = sum(atrasadas, c => c.restante), falta = sum(desp.filter(ativo), c => Math.max(0, c.restante)) + faltaAtras;
+    const entra = recebido + aReceber, sai = totalComp + gastoAvulso + faltaAtras, pago = pagoComp + gastoAvulso;
+    return { ym, rec, recebido, aReceber, desp, atrasadas, avulsos, gastoAvulso, falta, entra, sai, pago, resultado: entra - sai };
+  }
+  const linhaComp = c => `<div class="cm-li"><span class="num">${brs(c.venc)}</span><span class="t">${esc(c.desc)}</span><b class="num">${fmt(ativo(c) && c.restante > 0 && c.pago ? c.restante : c.valor - (c.desconto || 0))}</b>${ativo(c) && c.restante > 0 ? (c.venc < TODAY ? '<span class="pill p-crit">Vencida</span>' : c.pago ? '<span class="pill p-warn">Falta parte</span>' : '<span class="pill p-info">A pagar</span>') : '<span class="pill p-good">Paga</span>'}</div>`;
+  function grupoHtml(titulo, itens, total, falta, aberto, linhas) {
+    if (!itens.length) return "";
+    return `<details class="cm-g" ${aberto ? "open" : ""}><summary><span>${titulo} <span class="sub">(${itens.length})</span></span><b class="num">${fmt(total)}</b>${falta > 0 ? `<span class="cm-f num">falta ${fmt(falta)}</span>` : '<span class="cm-ok">em dia</span>'}</summary>${linhas}</details>`;
+  }
+  function vCorte(g) {
+    const pagosLanc = new Set(); for (const k in S.inst) for (const p of S.inst[k].pag || []) if (p.lanc) pagosLanc.add(p.lanc); for (const m of S.manuais) for (const p of m.pag || []) if (p.lanc) pagosLanc.add(p.lanc);
+    let a = g.ini ? ymOf(g.ini) : CUR, b = g.fim ? ymOf(g.fim) : addYM(a, 5);
+    if (b < addYM(a, 2)) b = addYM(a, 2); if (b > addYM(a, 11)) b = addYM(a, 11);
+    // saldo previsto: começa no caixa de hoje e soma o que entra e tira o que falta pagar, mês a mês
+    const cx = caixa(S), proj = {}, meses = [];
+    let run = cx;
+    for (let ym = CUR; ym <= b; ym = addYM(ym, 1)) { const m = corteDoMes(ym, pagosLanc); run += m.aReceber - m.falta; proj[ym] = run; }
+    for (let ym = a; ym <= b; ym = addYM(ym, 1)) meses.push(corteDoMes(ym, pagosLanc));
+    const negativo = meses.find(m => m.ym >= CUR && proj[m.ym] < 0);
+    const cards = meses.map(m => {
+      const fase = m.ym < CUR ? "passado" : m.ym === CUR ? "atual" : "futuro";
+      const pct = m.sai > 0 ? Math.min(100, m.pago / m.sai * 100) : 100;
+      const grupos = GRUPOS.map(([k, t]) => { const it = m.desp.filter(c => c.kind === k); return grupoHtml(t, it, sum(it, c => c.valor - (c.desconto || 0)), sum(it.filter(ativo), c => Math.max(0, c.restante)), k === "fat" && fase !== "passado", it.map(linhaComp).join("")); }).join("");
+      const atras = grupoHtml('<span class="neg">Atrasadas de meses anteriores</span>', m.atrasadas, sum(m.atrasadas, c => c.restante), sum(m.atrasadas, c => c.restante), true, m.atrasadas.map(linhaComp).join(""));
+      const avul = m.avulsos.length ? `<details class="cm-g"><summary><span>Gastos no débito, Pix e dinheiro <span class="sub">(${m.avulsos.length})</span></span><b class="num">${fmt(m.gastoAvulso)}</b><span class="cm-ok">já pagos</span></summary>${[...m.avulsos].sort((x, y) => x.data < y.data ? -1 : 1).map(l => `<div class="cm-li"><span class="num">${brs(l.data)}</span><span class="t">${esc(l.desc)}</span><b class="num">${fmt(l.valor)}</b></div>`).join("")}</details>` : "";
+      const entradas = m.rec.length || m.recebido ? `<details class="cm-g in"><summary><span>Entradas <span class="sub">(${m.rec.length})</span></span><b class="num pos">${fmt(m.entra)}</b>${m.aReceber > 0 ? `<span class="cm-f in num">a receber ${fmt(m.aReceber)}</span>` : '<span class="cm-ok">recebido</span>'}</summary>${m.rec.map(c => `<div class="cm-li"><span class="num">${brs(c.venc)}</span><span class="t">${esc(c.desc)}</span><b class="num pos">${fmt(c.valor)}</b>${ativo(c) && c.restante > 0 ? '<span class="pill p-info">A receber</span>' : '<span class="pill p-good">Recebida</span>'}</div>`).join("")}${m.recebido > sum(m.rec, c => c.pago) ? `<div class="cm-li"><span></span><span class="t sub">Outras entradas lançadas no mês</span><b class="num pos">${fmt(m.recebido - sum(m.rec, c => c.pago))}</b></div>` : ""}</details>` : "";
+      const p = proj[m.ym];
+      return `<article class="cm ${fase}">
+        <header><b>${MESL[+m.ym.slice(5) - 1][0].toUpperCase() + MESL[+m.ym.slice(5) - 1].slice(1)} ${m.ym.slice(0, 4)}</b><span class="pill ${fase === "atual" ? "p-info" : fase === "passado" ? "p-mute" : "p-warn"}">${fase === "atual" ? "Mês atual" : fase === "passado" ? "Encerrado" : "Previsão"}</span></header>
+        <div class="cm-n"><div><span>Entra</span><b class="num pos">${fmt(m.entra)}</b></div><div><span>Sai</span><b class="num">${fmt(m.sai)}</b></div><div><span>${m.resultado >= 0 ? "Sobra no mês" : "Falta no mês"}</span><b class="num ${m.resultado < 0 ? "neg" : "pos"}">${fmt(Math.abs(m.resultado))}</b></div></div>
+        <div class="cm-pago"><div class="bar"><i style="width:${pct.toFixed(0)}%"></i></div><span class="sub"><b>${fmt(m.pago)}</b> já pago · <b class="${m.falta > 0 ? "neg" : ""}">${fmt(m.falta)}</b> falta pagar</span></div>
+        ${atras}${grupos}${avul}${entradas}
+        ${!m.desp.length && !m.avulsos.length && !m.rec.length && !m.atrasadas.length ? '<p class="note">Nada previsto neste mês.</p>' : ""}
+        ${p !== undefined ? `<footer class="${p < 0 ? "neg" : ""}"><span>Saldo previsto no fim do mês</span><b class="num">${fmt(p)}</b></footer>` : ""}
+      </article>`;
+    }).join("");
+    return `<section class="panel corte">
+      ${head("Corte mensal · o que entra, o que sai e o que falta pagar", `<span class="hint">Faturas pelo mês de vencimento</span>`)}
+      <p class="note">Cada mês mostra as entradas previstas e recebidas, tudo o que vence (faturas, contas fixas, dívidas e contas avulsas) e o que já foi pago. O saldo previsto começa no caixa de hoje (${fmt(cx)}), soma o que ainda vai entrar e tira o que falta pagar.${meses.length > 0 && (g.fim ? ymDiff(a, ymOf(g.fim)) + 1 : 0) < meses.length ? " Mostra pelo menos 3 meses a partir do período escolhido." : ""}</p>
+      ${negativo ? `<div class="check bad">Atenção: em <b>${ymLong(negativo.ym)}</b> o saldo previsto fica negativo em <b>${fmt(Math.abs(proj[negativo.ym]))}</b>.</div>` : ""}
+      <div class="chart cm-chart"><span class="legend inl"><span><i></i>Entra</span><span><i class="c2"></i>Sai</span></span>${groupChart(meses.map(m => ({ l: ymLabel(m.ym), v: [m.entra, m.sai] })), [{ n: "Entra", c: "var(--accent)" }, { n: "Sai", c: "var(--c2)" }])}</div>
+      <div class="cm-row">${cards}</div>
+    </section>`;
+  }
   function vPainel2() {
+    const g = gDe(), gc = gConf();
+    ui.hz = "periodo"; ui.hzIni = g.ini && g.ini > TODAY ? g.ini : TODAY; ui.hzFim = g.fim || fimMes(addYM(CUR, 12)); // o saldo livre segue o filtro geral
     const sl = saldoLivre(S, hzDate());
     const passos = [[S.contas.length > 0, "Cadastre as contas e o dinheiro em espécie", "ajustes", "contas"], [S.cartoes.length > 0, "Cadastre os cartões com fechamento e vencimento", "ajustes", "cartoes"], [S.rec.length > 0, "Registre as contas fixas e os salários", "contas", "rec"], [S.lanc.length > 0 || S.parc.length > 0, "Importe um extrato ou fatura (CSV/OFX)", "importar", ""]];
     const bemvindo = passos.every(p => p[0]) ? "" : `<section class="panel start">${head("Primeiros passos", `<span class="hint">${passos.filter(p => p[0]).length} de ${passos.length}</span>`)}<ol class="steps">${passos.map(([ok, t, v, a]) => `<li class="${ok ? "ok" : ""}"><span>${t}</span>${ok ? '<span class="pill p-good">Feito</span>' : `<button class="mini primary" data-go="${v}" ${v === "ajustes" ? `data-aj="${a}"` : ""} ${v === "contas" ? 'data-act="comptab" data-arg="rec"' : ""}>Fazer agora</button>`}</li>`).join("")}</ol></section>`;
-    const mudados = Object.keys(pfMapa()).filter(k => k !== "_k" && Q[k]).length;
     // cartões
     const rc = pfDe("ccards"), maxL = Math.max(1, ...S.cartoes.map(c => c.limite));
     const linhas = S.cartoes.map(c => {
@@ -180,13 +283,13 @@ div.kpi{cursor:default}
     const rx = pfDe("rxg"), meses = mesesDe(rx).map(ym => ({ l: ymLabel(ym) + (ym === CUR ? " (até hoje)" : ""), v: [receitasMes(S, ym), sum(gastosMes(S, ym), r => r.valor)] }));
 
     return `${topbar("Painel", "Hoje, " + br(TODAY))}${bemvindo}
-    <div class="painel-barra"><span>Cada quadro tem o seu período: toque na data no canto do quadro para mudar.${mudados ? ` <b>${mudados} ${mudados === 1 ? "quadro" : "quadros"} fora do padrão.</b>` : ""}</span><span class="row-actions"><button class="mini" data-act="pftodos">Mesmo período em todos</button>${mudados ? `<button class="mini ghost" data-act="pfpadrao">Voltar ao padrão</button>` : ""}<button class="mini" data-go="analises">${icon("analises")} Análises</button></span></div>
+    <section class="pf-geral" aria-label="Período do painel"><div class="pf-geral-t">${icon("cal")}<b>Período do painel</b><span class="sub">${esc(g.texto)} · vale para todos os quadros</span></div>
+      <div class="pf-geral-b"><div class="seg" role="group" aria-label="Período">${["mes", "prox", "tri", "mesant", "ano", "tudo"].map(k => `<button data-act="pfg" data-arg="${k}" aria-pressed="${gc.p === k}">${k === "tri" ? "3 meses" : PER[k][0]}</button>`).join("")}<button data-act="pfgcustom" aria-pressed="${gc.p === "custom"}">${gc.p === "custom" ? esc(g.rot) : "Personalizado…"}</button></div><button class="mini" data-go="analises">${icon("analises")} Análises</button></div></section>
     <section class="kpis" aria-label="Indicadores principais">
       <div class="kpi hero">
-        <div class="hero-top"><span class="eyebrow">Saldo livre estimado</span><select id="hz" aria-label="Período do saldo livre">${opts(Object.entries(HZ).map(([k, v]) => [k, v[0]]), ui.hz)}</select></div>
-        ${ui.hz === "periodo" ? `<form class="hz-form" data-form="periodo"><label class="sr" for="hz-ini">Data inicial</label><input id="hz-ini" name="ini" type="date" value="${ui.hzIni}" required><span>a</span><label class="sr" for="hz-fim">Data final</label><input id="hz-fim" name="fim" type="date" value="${ui.hzFim}" required><button class="mini primary">Aplicar</button></form>` : ""}
+        <div class="hero-top"><span class="eyebrow">Saldo livre estimado</span><span class="pf-rot">${icon("cal")}até ${brs(ui.hzFim)}</span></div>
         <button class="v num" data-calc="livre">${fmt(sl.livre)}</button>
-        <span class="s">Quanto dá para gastar ${hzTexto()} sem faltar para os compromissos${ui.hz === "periodo" && ui.hzIni > TODAY ? " do período e os que vencem antes dele" : ""}. Não conta os ${fmt(sl.aReceber)} que ainda vão entrar. Este período vale só para este quadro.</span>
+        <span class="s">Quanto dá para gastar ${hzTexto()} sem faltar para os compromissos${ui.hz === "periodo" && ui.hzIni > TODAY ? " do período e os que vencem antes dele" : ""}. Não conta os ${fmt(sl.aReceber)} que ainda vão entrar.</span>
         <button class="how" data-calc="livre">Ver memória de cálculo →</button>
       </div>
       ${kpi("caixa", "Saldo de caixa", 'data-calc="caixa"')}
@@ -203,6 +306,7 @@ div.kpi{cursor:default}
       ${si("futuras", "Parcelas futuras", 'data-go="cartoes"')}
       ${si("aneg", "Dívidas a Negociar", 'data-go="dividas" title="Fora das contas até vocês decidirem como pagar"', "aneg", m => `· ${m.n} fora das contas`)}
     </section>
+    ${vCorte(g)}
     <div class="grid2">
       <section class="panel">
         ${head("Cartões de crédito", qchip("ccards"))}
@@ -251,6 +355,7 @@ div.kpi{cursor:default}
       const conf = { p };
       if (p === "custom") { if (tipo === "data") { if (!E.data.value) return toast("Escolha a data."), false; conf.data = E.data.value; } else { if (!E.ini.value || !E.fim.value) return toast("Informe as duas datas."), false; conf.ini = E.ini.value; conf.fim = E.fim.value; } }
       closeLayer();
+      if (alvo === "g") { gGravar(conf); render(); return false; }
       if (alvo === "todos") { const m = pfMapa(); for (const [k, [t]] of Object.entries(Q)) if (t === "per") m[k] = { ...conf }; pfGravar(); render(); toast("Período aplicado a todos os quadros do Painel (menos o saldo livre, que tem o seu)."); return false; }
       if (alvo.startsWith("q:")) { const k = alvo.slice(2), m = pfMapa(); if (p === Q[k][1]) delete m[k]; else m[k] = conf; pfGravar(); render(); return false; }
       if (alvo.startsWith("a:")) { const v = AN.lista().find(x => x.id === alvo.slice(2)); if (v) { v.pf = conf; AN.gravar(); } render(); return false; }
@@ -259,6 +364,8 @@ div.kpi{cursor:default}
   });
   Object.assign(acts, {
     pf: key => formPF("q:" + key, Q[key][2], Q[key][0], pfMapa()[key] || { p: Q[key][1] }, opcoesPer(key)),
+    pfg: k => { gGravar({ p: k }); render(); },
+    pfgcustom: () => { const c = gConf(); formPF("g", "todos os quadros do Painel", "per", c.p === "custom" ? c : { p: "custom" }, Object.keys(PER).filter(k => k !== "atual")); },
     pfreset: key => { delete pfMapa()[key]; pfGravar(); closeLayer(); render(); },
     pftodos: () => formPF("todos", "todos os quadros", "per", { p: "mes" }, Object.keys(PER).filter(k => k !== "atual")),
     pfpadrao: () => { const m = pfMapa(); for (const k of Object.keys(m)) if (k !== "_k") delete m[k]; pfGravar(); render(); toast("Todos os quadros voltaram ao período padrão."); },

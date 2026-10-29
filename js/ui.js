@@ -462,7 +462,7 @@ async function lerImagem(blob, aviso) {
 function destinoDoPrint(lido, texto) {
   // cartão pelo final do número escrito no documento ("Final 1234", "**** 1234")
   const T = norm(texto || "");
-  const porFinal = S.cartoes.filter(k => soDigitos(k.final).length >= 3 && new RegExp("(FINAL|\\*{2,}|X{4})\\s*" + soDigitos(k.final) + "\\b").test(T));
+  const porFinal = S.cartoes.filter(k => soDigitos(k.final).length >= 3 && new RegExp("(FINAL|\\*{2,}|X{4})[\\s.]*" + soDigitos(k.final) + "\\b").test(T));
   if (porFinal.length === 1) return porFinal[0].id;
   const b = norm(lido.banco || ""), achou = k => b && (norm(k.inst || "").includes(b) || b.includes(norm(k.inst || "x")) || norm(k.nome).includes(b));
   const cards = S.cartoes.filter(achou), contas = S.contas.filter(achou);
@@ -475,7 +475,7 @@ function destinoDoPrint(lido, texto) {
 }
 // texto lido (do print ou do PDF) → linhas editáveis
 function processaTexto(a, texto) {
-  const lido = lerTextoImagem(texto, TODAY), onde = a.pdf ? "PDF" : "print";
+  const lido = lerTextoImagem(texto, TODAY, { exigeData: a.pdf }), onde = a.pdf ? "PDF" : "print";
   Object.assign(a, { lendo: false, texto, banco: lido.banco, ehCartao: lido.cartao, raw: lido.itens, ignorados: lido.ignorados, vencDoc: lido.vencimento });
   if (!lido.itens.length) a.aviso = `Não encontrei lançamentos neste ${onde}. Confira se os valores aparecem com vírgula (ex.: 120,00) e as datas estão visíveis, ou adicione as linhas à mão abaixo.`;
   a.destino = destinoDoPrint(lido, texto); a.escolher = !a.destino;
@@ -498,11 +498,12 @@ function linhasDoPdf(items) {
   const out = [];
   for (const l of linhas) {
     l.its.sort((a, b) => a.x - b.x);
+    // quadros lado a lado (lançamentos à esquerda, resumo à direita): depois de um valor, um texto
+    // separado por um espaço grande começa outra linha ("Próxima fatura R$ 361,12" não vira parte da compra)
     let txt = "", fim = null;
     for (const it of l.its) {
       const gap = fim === null ? 0 : it.x - fim;
-      // duas colunas lado a lado: um lançamento novo começa com data depois de um valor
-      if (fim !== null && gap > Math.max(30, it.h * 4) && /^\s*\d{1,2}\/\d{1,2}/.test(it.s) && /\d,\d{2}\s*$/.test(txt)) { out.push(txt); txt = ""; }
+      if (fim !== null && gap > Math.max(24, it.h * 3) && /\d,\d{2}\s*[\-−]?\s*$/.test(txt) && /[A-Za-zÀ-ú]|^\s*\d{1,2}\/\d{1,2}/.test(it.s)) { out.push(txt); txt = ""; }
       else if (fim !== null && gap > it.h * 0.15 && !/\s$/.test(txt) && !/^\s/.test(it.s)) txt += " ";
       txt += it.s; fim = it.x + it.w;
     }
