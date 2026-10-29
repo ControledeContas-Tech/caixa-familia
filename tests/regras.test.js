@@ -316,3 +316,15 @@ test("campo parcela aceita vários jeitos de escrever", () => {
   for (const t of ["01/02", "1/2", "1 de 2", "01-02", "1x2", "Parcela 1 de 2", "parc. 01/02", "1 2"]) igual(C.lerParcela(t), { k: 1, n: 2 }, t);
   for (const t of ["", "2", "3/2", "1/49", "à vista"]) assert.equal(C.lerParcela(t), null, t);
 });
+
+test("PDF de fatura: só lançamentos com data entram; resumos e encargos ficam de fora", () => {
+  const t = ["Fatura mensal CASASBAHIA", "Data Descrição Valor R$", "GILMARA OLIVEIRA DA 4271.67**.****.3010",
+    "28/10 PICPAY*Emanoella SAO PAULO(12/12) 268,49", "Total parcelado para as próximas faturas", "Próxima fatura R$ 361,12", "Demais faturas R$ 100,00",
+    "06/04 PICPAY*EMANOELLA LOP SAO PAULO(07/08) 128,52", "Disponível em:", "22/10/2026", "Compras R$ 3.500,00 R$ 1.727,73 R$ 1.772,27", "Saque R$ 0,00 R$ 0,00 R$ 0,00",
+    "CREDITO ROTATIVO 18,50 % 666,69 % 714,39 % 20,50 %", "02/10 PAGAMENTO RECEBIDO - OBRIGADO 1.094,45 -"].join("\n");
+  const it = C.lerTextoImagem(t, "2026-10-28", { exigeData: true }).itens;
+  igual(it.map(i => [i.d, i.desc, i.parc && i.parc.k + "/" + i.parc.n, i.vs]), [
+    ["2026-10-28", "PICPAY*Emanoella SAO PAULO", "12/12", 26849],
+    ["2026-04-06", "PICPAY*EMANOELLA LOP SAO PAULO", "7/8", 12852],
+    ["2026-10-02", "PAGAMENTO RECEBIDO - OBRIGADO", null, -109445]]);
+});
