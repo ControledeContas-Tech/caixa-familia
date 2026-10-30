@@ -81,7 +81,7 @@ function anoProvavel(m, d, hoje) {
 function dataDaLinha(L, hoje) {
   let m = L.match(/^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2,4}))?\b/);
   if (m) { const d = +m[1], mm = +m[2]; if (d >= 1 && d <= 31 && mm >= 1 && mm <= 12) { const iso = m[3] ? `${m[3].length === 2 ? "20" + m[3] : m[3]}-${pad(mm)}-${pad(d)}` : anoProvavel(mm, d, hoje); return { iso, resto: L.slice(m[0].length) }; } }
-  m = L.match(/^(?:[A-Z]{3,9},?\s+)?(\d{1,2})\s*(?:DE\s+)?(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)[A-Z]*\.?(?:\s*(?:DE\s+)?(\d{4}))?/);
+  m = L.match(/^(?:[A-Z]{3,9}(?:-FEIRA)?,?\s+)?(\d{1,2})\s*(?:DE\s+)?(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)[A-Z]*\.?(?:\s*(?:DE\s+)?(\d{4}))?/);
   if (m) { const d = +m[1], mm = MESES_IMG[m[2]]; if (d >= 1 && d <= 31) return { iso: m[3] ? `${m[3]}-${pad(mm)}-${pad(d)}` : anoProvavel(mm, d, hoje), resto: L.slice(m.index + m[0].length) }; }
   if (/^HOJE\b/.test(L)) return { iso: hoje, resto: L.replace(/^HOJE\b/, "") };
   if (/^ONTEM\b/.test(L)) { const t = new Date(hoje + "T12:00:00Z"); t.setUTCDate(t.getUTCDate() - 1); return { iso: t.toISOString().slice(0, 10), resto: L.replace(/^ONTEM\b/, "") }; }
@@ -107,7 +107,7 @@ function limpaDesc(t) {
   return String(t || "").replace(/\*\s+/g, "*").replace(/\bR\s?\$\s*/gi, " ").replace(/(?<![\d\/])\d{1,2}\/\d{1,2}\/(\d{4}|\d{2})(?![\d\/])/g, " ")
     .replace(/[|]+/g, " ").replace(/[(\[]\s*[)\]]/g, " ").replace(/\s+/g, " ").replace(/^[\s\-–—−•·:.,;]+|[\s\-–—−•·:.,;+]+$/g, "").replace(/\s+[\-–—−]\s*$/, "").trim();
 }
-const QUADRO_IMG = /\b(PROXIMA FATURA|PROXIMAS FATURAS|DEMAIS FATURAS|TOTAL PARCELADO|COMPRAS|SAQUE|CREDITO ROTATIVO|ROTATIVO|PARCELAMENTO DE FATURA|MULTA|MORA|TAXA|ANUIDADE TOTAL|CUSTO EFETIVO|DISPONIVEL|UTILIZADO|PAGAMENTO MINIMO|SALDO ANTERIOR|SALDO DESTA FATURA|LANCAMENTOS NO CARTAO)\b/;
+const QUADRO_IMG = /\b(LANCAMENTOS DO MES|VALOR PAGO|CREDITOS|DESCONTOS|TOTAL ATUAL|ANTECIPAR|FECHAR RESUMO|PROXIMA FATURA|PROXIMAS FATURAS|DEMAIS FATURAS|TOTAL PARCELADO|COMPRAS|SAQUE|CREDITO ROTATIVO|ROTATIVO|PARCELAMENTO DE FATURA|MULTA|MORA|TAXA|ANUIDADE TOTAL|CUSTO EFETIVO|DISPONIVEL|UTILIZADO|PAGAMENTO MINIMO|SALDO ANTERIOR|SALDO DESTA FATURA|LANCAMENTOS NO CARTAO)\b/;
 // opcoes.exigeData: documento (PDF) — só é lançamento a linha que tem data de compra
 function lerTextoImagem(texto, hoje = TODAY, opcoes = {}) {
   const brutas = String(texto || "").split(/\r?\n/).map(l => l.replace(/[_“”"'`~]+/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
@@ -124,7 +124,9 @@ function lerTextoImagem(texto, hoje = TODAY, opcoes = {}) {
     const valores = [...L.matchAll(VALOR_IMG)];
     if (!valores.length) {
       // "Parcela 2/10" na linha de baixo do valor: pertence à compra anterior
-      const pm = L.trim().match(/^(?:PARCELA|PARC\.?)?\s*(\d{1,2})\s*(?:\/|DE)\s*(\d{1,2})(?:\s*PARCELAS?)?$/);
+      if (/\bCARTAO (TITULAR|ADICIONAL|VIRTUAL)\b|^FINAL \d{4}\b/.test(L.trim())) continue; // "cartão titular 1843 · Joao S."
+      let pm = L.trim().match(/^(?:PARCELA|PARC\.?)?\s*(\d{1,2})\s*(?:\/|DE)\s*(\d{1,2})(?:\s*PARCELAS?)?$/);
+      { const pj = L.trim().match(/^(?:PARCELA|PARC\.?)\s*(\d{3,4})$/); if (!pm && pj) { const t = pj[1], k = t.length === 4 ? t.slice(0, 2) : t.slice(0, 1), n = t.slice(k.length); if (+k >= 1 && +n >= 2 && +n <= 48 && +k <= +n) pm = [pj[0], k, n]; } } // "Parcela 115": a barra sumiu na leitura
       if (!dt && pm && itens.length && ultimaLinhaItem && !itens[itens.length - 1].parc && +pm[1] >= 1 && +pm[1] <= +pm[2] && +pm[2] >= 2) { itens[itens.length - 1].parc = { k: +pm[1], n: +pm[2] }; ultimaLinhaItem = false; continue; }
       ultimaLinhaItem = false;
       if (dt && !L.replace(/[^A-Z]/g, "")) { dataAtual = dt.iso; descPend = ""; continue; } // cabeçalho de dia ("20 OUT")
@@ -178,6 +180,35 @@ function lerTextoImagem(texto, hoje = TODAY, opcoes = {}) {
   const vencimento = vg && dataValida(vg[1], vg[2]) ? isoDe(vg[1], vg[2], vg[3], hoje) : null;
   return { itens, ignorados, banco, cartao, vencimento, linhas: brutas.length };
 }
+// junta vários prints da mesma fatura (tirados em sequência, com partes repetidas entre um e outro):
+// 1) linha sem data (topo do print) pega a data da mesma compra em outro print;
+// 2) cada compra (data + descrição parecida + valor) entra o maior número de vezes que aparece num MESMO print
+//    — assim a sobreposição entre prints some, mas duas compras iguais de verdade no mesmo dia continuam.
+function juntaPrints(listas) {
+  const mesma = (a, b) => Math.abs(a.vs) === Math.abs(b.vs) && parecido(a.desc, b.desc);
+  listas.forEach((l, li) => l.forEach(it => {
+    if (it.d) return;
+    // a mesma compra com data em outro print: fica com a correspondência mais forte (e só se ela for única)
+    let melhor = 0, datas = new Set();
+    listas.forEach((o, oi) => { if (oi !== li) o.forEach(x => { if (!x.d || Math.abs(x.vs) !== Math.abs(it.vs)) return; const sm = semelhanca(x.desc, it.desc); if (sm < 0.5) return; if (sm > melhor) { melhor = sm; datas = new Set([x.d]); } else if (sm === melhor) datas.add(x.d); }); });
+    if (datas.size === 1) it.d = [...datas][0];
+  }));
+  const grupos = [];
+  listas.forEach((l, li) => l.forEach(it => {
+    let g = grupos.find(g => (g.rep.d || "") === (it.d || "") && mesma(g.rep, it));
+    if (!g) grupos.push(g = { rep: it, por: new Map(), itens: [] });
+    g.por.set(li, (g.por.get(li) || 0) + 1); g.itens.push(it);
+  }));
+  const itens = []; let total = 0;
+  for (const g of grupos) {
+    const n = Math.max(...g.por.values()); total += g.itens.length;
+    const melhor = [...g.itens].sort((a, b) => (b.parc ? 1 : 0) - (a.parc ? 1 : 0) || b.desc.length - a.desc.length)[0];
+    const parc = melhor.parc || (g.itens.find(x => x.parc) || {}).parc || null;
+    for (let i = 0; i < n; i++) itens.push({ ...melhor, parc });
+  }
+  itens.sort((a, b) => (a.d || "9") > (b.d || "9") ? -1 : (a.d || "9") < (b.d || "9") ? 1 : 0);
+  return { itens, repetidas: total - itens.length };
+}
 function lerArquivo(nome, texto) {
   const ext = (nome.split(".").pop() || "").toLowerCase();
   if (ext === "ofx" || /<OFX>/i.test(texto.slice(0, 2000))) return { formato: "OFX", ...parseOFX(texto) };
@@ -186,7 +217,10 @@ function lerArquivo(nome, texto) {
 }
 
 // palavras significativas de uma descrição
-const toks = s => norm(s).replace(/[^A-Z0-9 ]/g, " ").split(/\s+/).filter(w => w.length >= 3 && !/^\d+$/.test(w) && !["PARCELA", "PARC", "COMPRA", "PAG", "PGTO"].includes(w));
+// palavras que não identificam a loja (cidade, país, tipo de empresa) não contam para dizer que duas descrições são da mesma compra
+const TOKS_FORA = new Set(["PARCELA", "PARC", "COMPRA", "PAG", "PGTO", "SAO", "PAULO", "RIO", "JANEIRO", "BELO", "HORIZONTE", "CURITIBA", "CAMPINAS", "BRASILIA", "SALVADOR", "RECIFE", "FORTALEZA", "PORTO", "ALEGRE", "SANTO", "ANDRE", "BERNARDO", "CAMPO", "OSASCO", "GUARULHOS", "BRASIL", "BRA", "LTDA", "EIRELI", "COM", "WWW", "COMERCIO", "SERVICOS"]);
+const toks = s => norm(s).replace(/[^A-Z0-9 ]/g, " ").split(/\s+/).filter(w => w.length >= 3 && !/^\d+$/.test(w) && !TOKS_FORA.has(w));
+const semelhanca = (a, b) => { const A = toks(a), B = toks(b); if (!A.length || !B.length) return norm(a) === norm(b) ? 1 : 0; return A.filter(w => B.some(x => x.startsWith(w) || w.startsWith(x))).length / Math.min(A.length, B.length); };
 function parecido(a, b) { const A = toks(a), B = toks(b); if (!A.length || !B.length) return norm(a) === norm(b); const c = A.filter(w => B.some(x => x.startsWith(w) || w.startsWith(x))).length; return c / Math.min(A.length, B.length) >= 0.5; }
 const diasEntre = (a, b) => Math.abs((Date.parse(a) - Date.parse(b)) / 864e5);
 function achaParcela(desc) {
@@ -285,4 +319,4 @@ function analisar(S, itens, destino, faturaKey, extras = []) {
 const catsDespesa = S => S.categorias.filter(c => c[1] !== "receita").map(c => c[0]);
 const catsReceita = S => S.categorias.filter(c => c[1] === "receita").map(c => c[0]);
 
-if (typeof module !== "undefined") module.exports = { candidatosDup, achaIgual, lerParcela, lerTextoImagem, dataDaLinha, parseCSV, parseOFX, parseValor, parseDataBR, lerArquivo, analisar, achaParcela, parecido, IMP_PEND, IMP_GRAVA };
+if (typeof module !== "undefined") module.exports = { juntaPrints, candidatosDup, achaIgual, lerParcela, lerTextoImagem, dataDaLinha, parseCSV, parseOFX, parseValor, parseDataBR, lerArquivo, analisar, achaParcela, parecido, IMP_PEND, IMP_GRAVA };
