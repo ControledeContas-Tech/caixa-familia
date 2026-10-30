@@ -11,7 +11,7 @@ function carregar(hoje = "2026-10-19") {
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   const codigo = ["core.js", "importar.js", "db.js"].map(f => fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8").replace(/if \(typeof module[^\n]*\n?/g, "")).join("\n;\n");
-  vm.runInContext(codigo + "\n;Object.assign(globalThis, { candidatosDup, achaIgual, lerParcela, divEtapa, divResumo, seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte, lerTextoImagem });", ctx);
+  vm.runInContext(codigo + "\n;Object.assign(globalThis, { juntaPrints, candidatosDup, achaIgual, lerParcela, divEtapa, divResumo, seed, vazio, saldoLivre, cardResumo, fatura, fatItens, keyOf, closeOf, parcVal, compromissos, caixa, gastosMes, receitasMes, projecao, simular, saldoConta, parseValor, parseDataBR, parseCSV, parseOFX, analisar, achaParcela, TABELAS, ORDEM, montarEstado, garanteIds, fmt, CUR, TODAY, recParcela, separaParcela, cpfValido, cpfFmt, diasAte, lerTextoImagem });", ctx);
   return ctx;
 }
 const C = carregar();
@@ -353,4 +353,26 @@ test("duplicidade: mesma compra lida com nome ou parcela diferente vira 'possív
   S.lanc.push({ id: "lN", data: "2026-09-10", desc: "NETFLIX.COM", tipo: "despesa", valor: 5590, cartao: "nubank", cat: "Lazer", origem: "manual" });
   const c = C.analisar(S, [{ d: "2026-10-10", desc: "NETFLIX.COM", vs: 5590 }], "nubank", "2026-11");
   assert.equal(c[0].st, "ok");
+});
+
+test("prints do app do cartão: dias da semana, linha do cartão, 'Parcela 115' e junção sem sobreposição", () => {
+  const hoje = "2026-10-30";
+  const p1 = ["< Fatura", "Outubro Novembro Dezembro", "99APP *99App, Sao Paulo R$ 7,20", "cartao titular 1843 Joao S.", "DL *UberRides, Sao Paulo R$ 18,96", "cartao titular 1843 Joao S.", "ADEGA LTDA, SAO PAULO R$ 5,80", "cartao titular 1843 Joao S.",
+    "Sábado, 24 de outubro", "MERCADO EXTRA 2410, SAO PAULO R$12,87", "cartao titular 1843 Joao S.", "JIMCOM\" LEANDRO CARN, SAO PAULO R$5,00", "cartão titular 1843 JoaoS.", "JIMCOM* LEANDRO CARN, SAO PAULO R$10,00", "cartao titular 1843 Joao S.",
+    "CRF 48 SPG GIOVANNI GRONC R$ 62,85", "cartão titular 1843 Joao S.", "CRF 48 SPG GIOVANNI GRONC R$ 79,93", "Parcela 115", "cartão titular 1843 Joao S.", "Sexta-feira, 23 de outubro", "A DE C MEIRELES REFEIC, SAO PAULO R$ 25,00", "cartão titular 1843 Joao S."].join("\n");
+  const p2 = ["< Fatura", "Outubro Novembro Dezembro", "DIX99 RIDE, SAO PAULO R$15,94", "cartao titular 1843 Joao S.", "DLII99 RIDE, SÃO PAULO R$ 5,00", "cartão titular 1843 Joao S.", "Terça-feira, 27 de outubro", "JIM.COM* LEANDRO CARN, SÃO PAUL... R$21,00", "cartao titular 1843 Joao S.", "POINT DO JAPA, SAO PAULO R$ 20,80", "cartao titular 1843 Joao S.",
+    "Segunda-feira, 26 de outubro", "JIM.COM\" LEANDRO CARN, SAO PAULO R$ 5,00", "cartao titular 1843 Joao S.", "Domingo, 25 de outubro", "POSTO JARDIM 10 LTDA, SAO PAULO R$ 150,00", "cartao titular 1843 Joao S.", "99APP *99App, Sao Paulo R$ 7,20", "cartao titular 1843 Joao S.", "DL *UberRides, Sao Paulo R$ 18,96", "cartao titular 1843 Joao S.", "ADEGA LTDA, SAO PAULO R$ 5,80", "cartao titular 1843 Joao S."].join("\n");
+  const p3 = ["< Fatura", "Outubro Novembro Dezembro", "Fechar resumo A", "Lançamentos do mes R$ 6.905,65", "Valor pago/creditos R$ 5.719,97", "Descontos R$ 0,00", "Total atual R$ 6.905,65", "Antecipar pagamento", "Lançamentos da fatura do mês", "Joao S. cartão titular 1843", "Quarta-feira, 28 de outubro",
+    "VITOR SOARES DE SOUZA, SAO PAULO R$ 3,00", "cartão titular 1843 Joao S.", "POINT DO JAPA, SÃO PAULO R$ 29,21", "cartão titular 1843 Joao S.", "DLII99 RIDE, SÃO PAULO R$ 15,94", "cartao titular 1843 Joao S.", "DLII99 RIDE, SAO PAULO R$ 5,00", "cartão titular 1843 Joao S.", "Terça-feira, 27 de outubro"].join("\n");
+  const l1 = C.lerTextoImagem(p1, hoje).itens, l3 = C.lerTextoImagem(p3, hoje).itens;
+  assert.equal(l3.length, 4); // o resumo da fatura (lançamentos do mês, pago/créditos, total) não entra
+  igual(l3.map(i => i.d), ["2026-10-28", "2026-10-28", "2026-10-28", "2026-10-28"]);
+  const crf = l1.find(i => i.vs === 7993); igual(crf.parc, { k: 1, n: 15 });
+  assert.equal(l1.find(i => i.vs === 2500).d, "2026-10-23"); // "Sexta-feira, 23 de outubro"
+  // em ordem embaralhada: o resultado é o mesmo
+  const j = C.juntaPrints([l3, C.lerTextoImagem(p1, hoje).itens, C.lerTextoImagem(p2, hoje).itens]);
+  const res = j.itens.map(i => `${i.d} ${i.vs}`).sort().reverse();
+  igual(res, ["2026-10-28 300", "2026-10-28 2921", "2026-10-28 1594", "2026-10-28 500", "2026-10-27 2100", "2026-10-27 2080", "2026-10-26 500", "2026-10-25 15000", "2026-10-25 720", "2026-10-25 1896", "2026-10-25 580", "2026-10-24 1287", "2026-10-24 500", "2026-10-24 1000", "2026-10-24 6285", "2026-10-24 7993", "2026-10-23 2500"].sort().reverse());
+  assert.equal(j.repetidas, 5); // 3 do topo do print 1 + 2 do topo do print 2 apareciam também em outro print
+  assert.ok(j.itens.every(i => i.d), "toda linha ganhou data");
 });
