@@ -20,7 +20,7 @@ Endereço: https://controledecontas-tech.github.io/caixa-familia/
 - Competência da fatura = mês do VENCIMENTO. "Fatura de novembro" é a que vence em novembro.
   - Regra: compra feita ANTES do dia de fechamento entra na fatura que fecha naquele mês; no dia do fechamento ou depois, vai para a fatura seguinte. Se o vencimento é num dia menor que o fechamento (ex.: fecha 31, vence 5), a fatura vence no mês seguinte ao fechamento.
   - Exemplo: cartão que fecha dia 31 e vence dia 5 → compra de 24/10 entra na fatura de novembro (fecha 31/10, vence 05/11); compra de 01/11 entra na fatura de dezembro.
-- Status da fatura: aberta (ainda recebe compras, antes do fechamento), fechada (fechou e não foi paga), parcial (paga em parte), paga, vazia.
+- Status da fatura (o que significa cada um): aberta (ainda recebe compras, antes do fechamento), fechada (fechou e não foi paga), parcial (paga em parte), paga, vazia.
 - Parcelamento no cartão: compra em N vezes vira N parcelas, uma em cada fatura seguida, a partir da fatura da compra. A 1ª parcela absorve os centavos que sobram da divisão. Parcelas futuras já aparecem nas próximas faturas ("Total por fatura" mostra só o que já é conhecido).
 - Caixa (saldo de caixa): soma dos saldos de hoje das contas marcadas "Entra no saldo de caixa disponível". Contas de reserva normalmente ficam fora.
 - Saldo de uma conta = saldo inicial (informado no cadastro) + receitas − despesas ± transferências até hoje.
@@ -136,11 +136,27 @@ Abas:
 No Chrome do computador: ícone de instalar na barra de endereço (ou menu ⋮ → Transmitir, salvar e compartilhar → Instalar página como app). No Android: menu ⋮ → Adicionar à tela inicial/Instalar app. No iPhone (Safari): Compartilhar → Adicionar à Tela de Início.
 
 ## Perguntas frequentes
-- "Por que a compra não está na fatura que eu esperava?" → pela data e pelo dia de fechamento do cartão (regra acima). Confira o fechamento em Configurações → Cartões.
+- "Por que a compra não está na fatura que eu esperava (caiu na fatura errada, na seguinte ou na anterior)?" → pela data e pelo dia de fechamento do cartão (regra acima). Confira o fechamento em Configurações → Cartões.
 - "Paguei a fatura e o saldo da conta caiu duas vezes" → o pagamento foi lançado como despesa além da fatura. Exclua a despesa e registre pelo "Pagar fatura".
 - "O saldo livre está negativo" → significa que o que falta pagar até a data escolhida é maior do que o dinheiro nas contas hoje (receitas previstas não contam até entrarem). Veja a memória de cálculo no Painel.
 - "Por que uma dívida não aparece nas contas?" → está "A negociar". Decida a forma de pagamento para ela entrar.
 - "Como lanço uma compra parcelada?" → + Lançamento → Despesa → escolha o cartão → Parcelas no cartão. Ou importe a fatura: o app detecta "Parcela 03/10".
 - "Como corrijo uma categoria?" → clique no lançamento e altere; para corrigir sempre, crie uma Regra de classificação.
 - "Como dou baixa numa conta de luz?" → Contas a pagar → Registrar pagamento (com o valor real; se for menor, decida o saldo).
+- "Como pago a fatura do cartão?" → Cartões → escolha o cartão e a fatura → botão "Pagar fatura" → informe o valor, a conta de onde sai o dinheiro e a data. Também dá para ir por Contas a pagar → "Abrir fatura". O pagamento vira uma transferência da conta para o cartão (não é despesa de novo).
+- "Para que serve o campo 'Paga com' do cartão?" → é a conta de onde sai o dinheiro para pagar a fatura. O app usa essa conta para prever a saída da fatura em Contas a pagar e no saldo livre, e já a sugere no "Pagar fatura". Muda em Configurações → Cartões → Editar.
+- "Qual a diferença entre dívida 'a negociar' e 'em pagamento'?" → A negociar: a dívida existe, mas fica fora das contas (não entra no saldo livre nem em Contas a pagar) até vocês decidirem como pagar. Em pagamento: depois de "Decidir pagamento" (à vista, acordo, parcelamento ou contrato), as parcelas entram em Contas a pagar e passam a contar no saldo livre.
+- "Onde vejo quem alterou, excluiu ou lançou alguma coisa (histórico de alterações)?" → Configurações → Auditoria: mostra quem fez o quê e quando.
+- "Paguei menos que o previsto, e agora?" → Registre o valor que pagou em "Registrar pagamento". A conta fica "parcial" e aparece "Decidir saldo": manter pendente, agendar o restante para outra data, dividir em novos vencimentos, registrar desconto/abatimento, negociar ou cancelar o restante (com motivo).
+- "Como cadastro uma conta fixa (aluguel, luz, internet) ou o salário?" → Contas a pagar → aba Recorrências → "+ Nova recorrência". Para valores que mudam todo mês (luz, água), escolha natureza Variável.
+- "Como registro um salário que entrou?" → Contas a pagar → aba A receber → "Registrar recebimento" na receita prevista. Se não for recorrente, use + Lançamento → Receita.
+- "O saldo da conta não bate com o banco" → confira o saldo inicial em Configurações → Contas → Editar (é o saldo na data de início do controle) e se faltou lançar alguma entrada ou saída.
+- "Como mudo o dia de fechamento ou vencimento do cartão?" → Configurações → Cartões → Editar o cartão.
+- "Como convido a Manu ou outra pessoa?" → Configurações → Pessoas e acesso → "Convidar pessoa" (nome, acesso e e-mail). Depois mande o endereço do app para ela criar a conta com esse e-mail.
+- "Como transfiro dinheiro entre contas ou guardo na reserva?" → + Lançamento → Transferência → Sai de / Vai para. Não conta como despesa nem receita.
+- "Como cancelo as parcelas futuras de uma compra?" → abra a parcela (em Cartões ou Lançamentos) → cancelar a partir da parcela escolhida. Faturas já pagas não mudam.
+- "Importei errado, como desfaço?" → Importar → Histórico de importações → desfazer o lote. Os lançamentos daquele lote são retirados.
+
+## Alícia (assistente)
+Botão redondo azul-turquesa no canto da tela. Responde primeiro com os cálculos do próprio app (números exatos, sem custo, sem enviar dados para fora) e com este manual. Quando a pergunta é aberta ou difícil, e se vocês permitirem, pede ajuda a uma IA gratuita do Google (Gemini), enviando só a pergunta e os números ligados a ela. Dá para anexar uma imagem (clipe ou Ctrl+V): o app lê o texto da imagem no aparelho e, com a IA ligada, ela também vê a imagem. As conversas ficam guardadas só no aparelho; "Nova" começa outra.
 `;

@@ -1,14 +1,14 @@
-// ================= ALÍCIA · assistente de IA do Caixa da Família =================
-// Botão flutuante em todas as telas. A pergunta vai para a Edge Function "alicia" (Supabase), que confere o login
-// e chama a IA com a chave secreta do servidor. Junto com a pergunta vão o manual do sistema (js/alicia-manual.js),
-// o que está na tela agora e um resumo dos dados da família, para ela responder sobre qualquer coisa do app.
+// ================= ALÍCIA · assistente do Caixa da Família =================
+// Botão flutuante em todas as telas. Primeiro responde no próprio aparelho, sem custo (js/alicia-local.js: cálculos do
+// sistema + manual). Só as perguntas abertas ou difíceis vão, com permissão, para a Edge Function "alicia", que usa uma IA
+// gratuita (Google Gemini) e recebe apenas a pergunta, os números ligados a ela e a imagem anexada, se houver.
 
 (function () {
   const AL = { aberta: false, msgs: [], enviando: false, ctrl: null, rascunho: "" };
   const MAX_HIST = 40, MANDA = 12;
   const chave = () => "caixa-alicia-" + (ME ? ME.id : "");
   const carrega = () => { try { AL.msgs = JSON.parse(localStorage.getItem(chave()) || "[]"); } catch (e) { AL.msgs = []; } AL._k = chave(); };
-  const guarda = () => { try { localStorage.setItem(chave(), JSON.stringify(AL.msgs.filter(m => !m.erro).slice(-MAX_HIST))); } catch (e) {} };
+  const guarda = () => { try { localStorage.setItem(chave(), JSON.stringify(AL.msgs.filter(m => !m.erro && !m.perm && !m.lendo).slice(-MAX_HIST))); } catch (e) {} };
 
   // ---------- estilos ----------
   const css = document.createElement("style");
@@ -91,72 +91,90 @@
     return out.join("");
   }
 
-  // ---------- contexto: o que está na tela + resumo dos dados ----------
-  const nome = id => (S.contas.find(c => c.id === id) || S.cartoes.find(c => c.id === id) || S.invest.find(i => i.id === id) || {}).nome || id || "—";
-  const telaAtual = () => (VIEWS.find(v => v[0] === ui.view) || [, ui.view])[1];
-  const limpa = (s, n) => String(s || "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, n);
-  function contexto() {
-    const o = [];
-    const sec = (t, linhas) => { if (linhas && linhas.length) o.push(`### ${t}\n${linhas.join("\n")}`); };
-    o.push(`Hoje: ${br(TODAY)} (${["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"][new Date(TODAY + "T12:00:00Z").getUTCDay()]}). Quem pergunta: ${ME.nome} (${ME.papel === "admin" ? "administrador" : "membro"}). Família: ${FAM.nome}. Início do controle: ${br(S.inicio)}.`);
-    o.push(`Tela aberta agora: ${telaAtual()}${ui.view === "lancamentos" ? ` (filtros: mês ${ui.lf.mes}${ui.lf.conta ? ", " + nome(ui.lf.conta) : ""}${ui.lf.cat ? ", " + ui.lf.cat : ""}${ui.lf.q ? `, busca "${ui.lf.q}"` : ""})` : ui.view === "cartoes" && ui.card ? ` (cartão ${nome(ui.card)}, fatura ${ui.cardKey || "atual"})` : ui.view === "contas" ? ` (mês ${ui.compMes})` : ""}.`);
-    o.push(`Telas para link (#ir:chave): ${VIEWS.map(v => v[0] + " = " + v[1]).join("; ")}. Abas de Configurações: #ir:ajustes/contas, /cartoes, /categorias, /regras, /pessoas, /seguranca, /dados, /auditoria.`);
-    const main = document.querySelector("#app main"), camada = document.querySelector(".modal, .drawer");
-    if (main) o.push(`### Texto visível na tela agora\n${limpa(main.innerText, 9000)}`);
-    if (camada && camada.innerText.trim()) o.push(`### Janela aberta sobre a tela\n${limpa(camada.innerText, 3000)}`);
+  // ---------- estilos novos: imagem anexada, origem da resposta, permissão ----------
+  const css2 = document.createElement("style");
+  css2.textContent = `
+.al-form .al-clip{background:transparent;color:var(--muted);border:1px solid var(--line);min-width:42px}
+.al-form .al-clip:hover{color:#0b7f8c;border-color:#19c9dc}
+.al-anexo{display:flex;align-items:center;gap:8px;padding:8px 10px 0;background:var(--surface)}
+.al-anexo img{height:48px;max-width:90px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+.al-anexo span{font-size:12px;color:var(--muted);flex:1}
+.al-anexo button{border:0;background:var(--sunken);color:var(--ink);border-radius:6px;width:26px;height:26px;cursor:pointer}
+.al-m.eu img{display:block;max-width:180px;max-height:140px;border-radius:8px;margin-bottom:6px}
+.al-fonte{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:11.5px;color:var(--muted)}
+.al-fonte .tag{border:1px solid var(--line);border-radius:99px;padding:1px 8px}
+.al-fonte .tag.ia{border-color:#19c9dc;color:#0b7f8c}
+.al-perm{border:1px solid #19c9dc;background:color-mix(in srgb,#19c9dc 8%,var(--surface));border-radius:12px;padding:10px 12px;font-size:13.5px;line-height:1.45}
+.al-perm .acoes{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.al-perm button{border:1px solid #19c9dc;background:#19c9dc;color:#fff;border-radius:10px;padding:6px 12px;font:500 13px var(--f-body);cursor:pointer}
+.al-perm button.nao{background:transparent;color:#0b7f8c}
+.al-etapa{font-size:12.5px;color:var(--muted)}
+.al-rodape button{border:0;background:none;color:#0b7f8c;text-decoration:underline;font:inherit;cursor:pointer;padding:0}`;
+  document.head.appendChild(css2);
+  const CLIPE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/></svg>';
 
-    sec("Pessoas", S.pessoas.map(p => `- ${p.nome} · ${p.acesso || "responsável"}`));
-    sec("Contas (saldo de hoje)", S.contas.map(c => `- ${c.nome} · ${c.tipo} · ${c.inst || "—"} · resp. ${c.resp || "—"} · ${c.caixa ? "entra no caixa" : "fora do caixa"} · saldo inicial ${fmt(c.saldoIni || 0)} · saldo hoje ${fmt(saldoConta(S, c))}`));
-    try { const sl = saldoLivre(S, mk(CUR, 31)); o.push(`### Saldo livre até o fim deste mês\nCaixa hoje ${fmt(sl.caixa)} − falta pagar até ${br(mk(CUR, 31))} ${fmt(sl.comprometido)} − reservas planejadas ${fmt(sl.prov)} = saldo livre ${fmt(sl.livre)}. Receitas ainda a receber neste mês (não incluídas): ${fmt(sl.aReceber)}.`); } catch (e) {}
+  // ---------- permissão para usar a IA gratuita (por pessoa, neste aparelho) ----------
+  const chavePref = () => "caixa-alicia-ia-" + (ME ? ME.id : "");
+  const iaPref = () => { try { return localStorage.getItem(chavePref()); } catch (e) { return null; } }; // "sim" | "nao" | null
+  const setIaPref = v => { try { v ? localStorage.setItem(chavePref(), v) : localStorage.removeItem(chavePref()); } catch (e) {} };
+  let iaIndisponivel = null; // motivo, quando o servidor disse que a IA não está ligada
 
-    for (const c of S.cartoes) {
-      const r = cardResumo(S, c), at = r.atual.key, fs = [];
-      for (let k = addYM(at, -3); k <= addYM(at, 8); k = addYM(k, 1)) { const f = fatura(S, c, k); if (f.itens.length || f.pago) fs.push(`  - fatura de ${ymLong(k)}: ${f.status}, fecha ${br(f.fecha)}, vence ${br(f.vence)}, total ${fmt(f.total)}, pago ${fmt(f.pago)}, saldo ${fmt(f.saldo)}, ${f.itens.length} itens`); }
-      sec(`Cartão ${c.nome}`, [`- final ${c.final || "—"} · fecha dia ${c.fecha} · vence dia ${c.vence} · limite ${fmt(c.limite || 0)} · paga com ${nome(c.pagaCom)} · resp. ${c.resp || "—"} · em aberto ${fmt(r.deve)} · disponível estimado ${fmt(r.disponivel)} · fatura atual: ${ymLong(at)} · compras de hoje cairiam na fatura de ${ymLong(keyOf(c, TODAY))}`, ...fs]);
-    }
-    const parcs = S.parc.map(p => { const c = cardOf(S, p.cartao); if (!c) return null; const k0 = p.k0 || keyOf(c, p.data), k = ymDiff(k0, keyOf(c, TODAY)) + 1; if (k > p.n || (p.cancelDe && k >= p.cancelDe)) return null; return `- ${p.desc} · ${c.nome} · compra ${br(p.data)} · ${fmt(p.total)} em ${p.n}× de ${fmt(parcVal(p, 2))} · 1ª na fatura de ${ymLabel(k0)} · agora na ${Math.max(1, k)}/${p.n} · última em ${ymLabel(addYM(k0, p.n - 1))}${p.cancelDe ? ` · canceladas a partir da ${p.cancelDe}ª` : ""}`; }).filter(Boolean);
-    sec("Parcelamentos em andamento no cartão", parcs);
-
-    const cm = []; for (let ym = addYM(CUR, -2); ym <= addYM(CUR, 3); ym = addYM(ym, 1)) for (const c of compromissos(S, ym, ym)) cm.push(`- ${br(c.venc)} · ${c.desc} · ${c.tipo}${c.kind === "fat" ? " (fatura)" : c.kind === "div" ? " (dívida)" : c.kind === "man" ? " (avulsa)" : c.tipo === "receita" ? " (receita prevista)" : " (recorrência)"} · previsto ${fmt(c.valor)}${c.desconto ? ` (desconto ${fmt(c.desconto)})` : ""} · pago ${fmt(c.pago)} · restante ${fmt(Math.max(0, c.restante))} · ${c.status}${ativo(c) && c.venc < TODAY ? " · VENCIDA" : ""}${c.estimado ? " · valor estimado" : ""}`);
-    sec(`Contas a pagar e a receber (${ymLong(addYM(CUR, -2))} a ${ymLong(addYM(CUR, 3))})`, cm);
-    sec("Recorrências", S.rec.map(r => `- ${r.desc} · ${r.tipo} · ${r.natureza || "Fixa"} · ${r.cat}${r.sub ? "/" + r.sub : ""} · ${fmt(r.valor)} · dia ${r.dia} · ${nome(r.conta)} · ${ymLabel(r.inicio)} a ${r.fim ? ymLabel(r.fim) : "sem fim"}${r.parcTotal ? ` · ${r.parcTotal} parcelas` : ""} · resp. ${r.resp || "—"}`));
-    sec("Avulsas (contas lançadas à mão)", S.manuais.map(m => `- ${m.desc} · vence ${br(m.venc)} · ${fmt(m.valor)} · ${m.cat || ""}`));
-    sec("Dívidas", S.dividas.map(d => { const r = divResumo(S, d); return `- ${d.nome} · credor ${d.credor || "—"} · etapa ${{ negociar: "A negociar (fora das contas)", pagamento: "Em pagamento", quitada: "Quitada" }[r.etapa]}${d.decisao ? " · " + (DECISOES[d.decisao] || d.decisao) : ""} · saldo ${fmt(d.saldo || 0)}${d.valorOriginal ? ` · original ${fmt(d.valorOriginal)}` : ""}${r.etapa !== "negociar" ? ` · parcela ${fmt(d.parcela || 0)} · ${r.pagas}/${d.total} pagas · falta ${fmt(r.falta)}${r.proxima ? ` · próxima ${br(r.proxima.venc)} ${fmt(r.proxima.restante)}` : ""}${r.atrasadas ? ` · ${r.atrasadas} atrasada(s)` : ""} · dia ${d.dia} · juros ${d.taxa != null ? d.taxa + "% a.m." : "não informado"}` : ""} · prioridade ${d.prioridade || "Média"}${d.desde ? ` · desde ${br(d.desde)}` : ""}${d.obs ? ` · obs: ${d.obs}` : ""}`; }));
-    try { const p = projecao(S, ui.varMes || 0); sec(`Previsão 12 meses (gastos variáveis estimados ${fmt(ui.varMes || 0)}/mês)`, [`ponto de partida ${fmt(p.inicio)}`, ...p.meses.map(x => `- ${ymLabel(x.ym)}: receitas ${fmt(x.rec)}, fixas ${fmt(x.fixas)}, dívidas ${fmt(x.div)}, faturas ${fmt(x.fat)}, variáveis ${fmt(x.variaveis)} → saldo livre ao fim ${fmt(x.fim)}`)]); } catch (e) {}
-    sec("Investimentos", S.invest.map(i => `- ${i.nome} · ${i.tipo} · ${i.inst || "—"} · saldo ${fmt(investSaldo(i))} · aportado ${fmt(investAportado(i))} · rendimentos ${fmt(investRend(i))}`));
-    sec("Provisões", S.provisoes.map(p => `- ${p.nome} · alvo ${fmt(p.alvo)} · reservado ${fmt(provReservado(S, p))} · uso ${p.uso}${p.conta ? " · em " + nome(p.conta) : " · planejada no caixa"}`));
-    for (let ym = addYM(CUR, -2); ym <= CUR; ym = addYM(ym, 1)) { const g = {}; gastosMes(S, ym).forEach(r => g[r.cat || "Sem categoria"] = (g[r.cat || "Sem categoria"] || 0) + r.valor); const t = Object.values(g).reduce((a, b) => a + b, 0); sec(`Gastos por categoria em ${ymLong(ym)} (cartão pela fatura do mês; conta pela data) · total ${fmt(t)} · receitas lançadas ${fmt(receitasMes(S, ym))}`, Object.entries(g).sort((a, b) => b[1] - a[1]).map(([k, v]) => `- ${k}: ${fmt(v)}`)); }
-    sec("Categorias", S.categorias.map(c => `- ${c[0]}${c[1] && c[1] !== "receita" ? ": " + c[1] : c[1] === "receita" ? " (receita)" : ""}`));
-    sec("Regras de classificação", [...S.regras].sort((a, b) => a.prio - b.prio).map(r => `- "${r.trecho}" → ${r.cat}${r.sub ? "/" + r.sub : ""} (prioridade ${r.prio})`));
-
-    // lançamentos: os mais recentes primeiro (inclui compras de cartão com a fatura em que caem)
-    const desde = addDays(TODAY, -150);
-    const ls = S.lanc.filter(l => !l.excluido && l.data >= desde).sort((a, b) => a.data < b.data ? 1 : -1);
-    const linhaL = l => { const c = l.cartao && cardOf(S, l.cartao); return `${br(l.data)} | ${l.desc} | ${l.tipo} | ${fmt(l.valor)} | ${l.tipo === "transferencia" ? nome(l.conta) + " → " + nome(l.destino) + (l.fatura ? " (fatura " + ymLabel(l.fatura) + ")" : "") : c ? "cartão " + c.nome + " · fatura " + ymLabel(l.fatura || keyOf(c, l.data)) : nome(l.conta)} | ${l.cat || ""}${l.sub ? "/" + l.sub : ""} | ${l.resp || ""} | ${l.origem || ""}${l.obs ? " | obs: " + l.obs : ""}`; };
-    const lim = 900;
-    sec(`Lançamentos de ${br(desde)} até hoje (${ls.length}${ls.length > lim ? `, mostrando os ${lim} mais recentes` : ""}) — data | descrição | tipo | valor | onde | categoria | responsável | origem`, ls.slice(0, lim).map(linhaL));
-    const antigos = S.lanc.filter(l => !l.excluido && l.data < desde).length;
-    if (antigos) o.push(`(Há mais ${antigos} lançamentos anteriores a ${br(desde)} que não foram enviados; para eles, oriente a usar a busca ou os filtros de Lançamentos.)`);
-    sec("Importações recentes", S.importacoes.slice(0, 10).map(i => `- ${i.id} · ${String(i.data).slice(0, 10)} · ${i.arquivos} · ${i.incl} incluídos, ${i.vinc} vinculados, ${i.ign} ignorados · ${i.user}`));
-    sec("Auditoria recente", S.audit.slice(0, 25).map(a => `- ${String(a.ts).slice(0, 16).replace("T", " ")} · ${a.user} · ${a.acao} · ${a.alvo}${a.det ? " · " + a.det : ""}`));
-    o.push(`Instruções de resposta: seja direta (respostas curtas por padrão; detalhe quando pedirem). Valores sempre em R$ com vírgula. Quando ajudar, inclua um link para a tela no formato [Abrir Cartões](#ir:cartoes) ou [Abrir cadastro de cartões](#ir:ajustes/cartoes). Se a pergunta depende de algo que não está nos dados enviados, diga o que falta e onde ver.`);
-    return o.join("\n\n");
+  // ---------- imagem ----------
+  function carregaImg(blob) { return new Promise((ok, ko) => { const u = URL.createObjectURL(blob), im = new Image(); im.onload = () => { ok(im); URL.revokeObjectURL(u); }; im.onerror = () => { ko(new Error("imagem inválida")); URL.revokeObjectURL(u); }; im.src = u; }); }
+  async function reduz(blob, max, q) { const im = await carregaImg(blob), k = Math.min(1, max / Math.max(im.width, im.height)), cv = document.createElement("canvas"); cv.width = Math.round(im.width * k); cv.height = Math.round(im.height * k); const c = cv.getContext("2d"); c.fillStyle = "#fff"; c.fillRect(0, 0, cv.width, cv.height); c.drawImage(im, 0, 0, cv.width, cv.height); return cv.toDataURL("image/jpeg", q); }
+  async function anexa(file) {
+    if (!file || !/^image\//.test(file.type)) { toast("Anexe uma imagem (print ou foto)."); return; }
+    if (file.size > 15e6) { toast("Imagem muito grande (máximo 15 MB)."); return; }
+    try { AL.img = { blob: file, thumb: await reduz(file, 220, 0.7), nome: file.name || "imagem colada" }; } catch (e) { toast("Não consegui abrir essa imagem."); return; }
+    desenha(true); document.getElementById("al-txt")?.focus();
   }
 
   // ---------- conversa ----------
+  const historicoIA = () => AL.msgs.filter(m => !m.lendo && !m.erro && !m.perm && m.content).slice(-8).map(m => ({ role: m.role, content: m.content }));
+  const telaTexto = () => { const main = document.querySelector("#app main"); return main ? main.innerText.replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim().slice(0, 2500) : ""; };
+  const iaPossivel = () => iaPref() !== "nao" && !iaIndisponivel;
+
   async function enviar(texto) {
-    texto = String(texto || "").trim(); if (!texto || AL.enviando) return;
-    AL.msgs = AL.msgs.filter(m => !m.erro);
-    AL.msgs.push({ role: "user", content: texto, ts: Date.now() });
-    const resp = { role: "assistant", content: "", ts: Date.now(), lendo: true }; AL.msgs.push(resp);
-    AL.enviando = true; AL.rascunho = ""; desenha(true);
+    texto = String(texto || "").trim(); const img = AL.img;
+    if ((!texto && !img) || AL.enviando) return;
+    if (!texto) texto = "O que é isto na imagem? Me explique.";
+    AL.msgs = AL.msgs.filter(m => !m.erro && !m.perm);
+    AL.msgs.push({ role: "user", content: texto, img: img ? img.thumb : null, ts: Date.now() });
+    const resp = { role: "assistant", content: "", ts: Date.now(), lendo: true, etapa: img ? "Lendo a imagem…" : "" }; AL.msgs.push(resp);
+    AL.img = null; AL.enviando = true; AL.rascunho = ""; { const t = document.getElementById("al-txt"); if (t) t.value = ""; } desenha(true);
+    let ocr = "";
+    try {
+      if (img && typeof lerImagem === "function") { ocr = await lerImagem(img.blob, (p, e) => { resp.etapa = `Lendo a imagem… ${Math.round((p || 0) * 100)}%`; atualizaUltima(); }); resp.etapa = ""; }
+    } catch (e) { console.warn("OCR", e); resp.etapa = ""; }
+    let local = null;
+    try { local = AliciaLocal.responder(texto, { ocr, ultimo: AL.ultimo }); } catch (e) { console.error("Alícia local", e); local = { texto: "", conf: 0 }; }
+    if (local.intent && local.intent !== "manual" && local.conf >= 0.6) AL.ultimo = { intent: local.intent, ent: local.ent };
+    const precisaIA = local.conf < 0.62 || local.opiniao || (img && local.conf < 0.85);
+    const payload = { texto, local, img, ocr };
+    if (precisaIA && iaPossivel()) {
+      if (iaPref() === "sim") { await perguntaIA(payload, resp); }
+      else { mostraLocal(resp, local, true); AL.msgs.push({ role: "assistant", perm: true, content: "", ts: Date.now() }); AL.pend = payload; }
+    } else mostraLocal(resp, local, false);
+    resp.lendo = false; AL.enviando = false; AL.ctrl = null; guarda(); desenha(true);
+  }
+  function mostraLocal(resp, local, vaiPedirIA, nota) {
+    resp.lendo = false; resp.fonte = "app"; resp.podeIA = !vaiPedirIA && iaPossivel() && local.conf < 0.85;
+    if (local.texto && local.conf >= 0.35) resp.content = (local.conf < 0.62 && !vaiPedirIA ? "Não tenho certeza se entendi, mas veja se isto ajuda:\n\n" : "") + local.texto;
+    else { resp.content = "Não entendi bem essa pergunta só com os dados do app." + (vaiPedirIA ? "" : " Tente de um destes jeitos:"); resp.sugs = vaiPedirIA ? null : AliciaLocal.sugestoesFalha(); }
+    if (nota) resp.content += `\n\n*(${nota})*`;
+  }
+  async function perguntaIA(p, resp) {
+    resp.fonte = "ia"; resp.lendo = true; resp.etapa = "Pensando…"; resp.content = ""; atualizaUltima();
     try {
       const cfg = window.CAIXA_CONFIG || {}, { data } = await SB.auth.getSession(), tok = data && data.session && data.session.access_token;
       if (!tok) throw new Error("Sua sessão expirou. Entre no app de novo.");
+      let imagem = null; if (p.img) { const d = await reduz(p.img.blob, 1280, 0.82); imagem = { mime: "image/jpeg", data: d.split(",")[1] }; }
+      const trechos = (p.local.trechos || []).slice(0, 5).map(c => `[${c.secao}]\n${c.texto}`).join("\n\n");
+      const contexto = [AliciaLocal.resumoBase(), p.local.dados ? "Dados ligados à pergunta: " + p.local.dados : "", p.ocr ? "Texto lido da imagem anexada (pode ter erros de leitura):\n" + p.ocr.slice(0, 3000) : "", "Texto visível na tela aberta:\n" + telaTexto()].filter(Boolean).join("\n\n");
+      const msgs = historicoIA(); if (!msgs.length || msgs[msgs.length - 1].role !== "user") msgs.push({ role: "user", content: p.texto });
       AL.ctrl = new AbortController();
-      const r = await fetch(cfg.url + "/functions/v1/alicia", { method: "POST", signal: AL.ctrl.signal, headers: { "Content-Type": "application/json", Authorization: "Bearer " + tok, apikey: cfg.chave },
-        body: JSON.stringify({ manual: window.ALICIA_MANUAL || "", contexto: contexto(), mensagens: AL.msgs.filter(m => !m.lendo && !m.erro).slice(-MANDA).map(m => ({ role: m.role, content: m.content })) }) });
-      if (!r.ok) { let e = ""; try { e = (await r.json()).erro; } catch (x) {} throw new Error(e || (r.status === 404 ? "A Alícia ainda não foi instalada no servidor." : "Falha ao falar com a Alícia (erro " + r.status + ").")); }
+      const r = await fetch(cfg.url + "/functions/v1/alicia", { method: "POST", signal: AL.ctrl.signal, headers: { "Content-Type": "application/json", Authorization: "Bearer " + tok, apikey: cfg.chave }, body: JSON.stringify({ manual: trechos, contexto, mensagens: msgs, imagem }) });
+      if (!r.ok) { let j = {}; try { j = await r.json(); } catch (x) {} if (r.status === 503 || r.status === 404) iaIndisponivel = j.erro || "IA não instalada"; throw new Error(j.erro || "A IA gratuita não respondeu (erro " + r.status + ")."); }
       const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "", quando = 0;
       for (;;) {
         const { value, done } = await rd.read(); if (done) break;
@@ -165,30 +183,38 @@
           const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
           if (!ln.startsWith("data:")) continue;
           let ev; try { ev = JSON.parse(ln.slice(5)); } catch (e) { continue; }
-          if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") { resp.content += ev.delta.text; resp.lendo = false; if (Date.now() - quando > 60) { quando = Date.now(); atualizaUltima(); } }
-          else if (ev.type === "error") throw new Error(ev.error && /overload/i.test(ev.error.type || "") ? "O serviço da IA está sobrecarregado agora. Tente de novo em instantes." : "A resposta foi interrompida.");
+          if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") { resp.content += ev.delta.text; resp.lendo = false; resp.etapa = ""; if (Date.now() - quando > 60) { quando = Date.now(); atualizaUltima(); } }
+          else if (ev.type === "error") throw new Error("A resposta da IA foi interrompida.");
         }
       }
-      if (!resp.content.trim()) throw new Error("A Alícia não respondeu. Tente de novo.");
+      if (!resp.content.trim()) throw new Error("A IA gratuita não respondeu.");
     } catch (e) {
-      if (e.name === "AbortError") { if (!resp.content) AL.msgs.pop(); }
-      else { if (resp.content) resp.content += "\n\n*(resposta interrompida)*"; else { AL.msgs.pop(); AL.msgs.push({ role: "assistant", content: e.message || String(e), erro: true, pergunta: texto }); } }
+      if (e.name === "AbortError") { if (!resp.content) mostraLocal(resp, p.local, false, "resposta da IA interrompida"); }
+      else if (resp.content) resp.content += "\n\n*(resposta interrompida)*";
+      else mostraLocal(resp, p.local, false, e.message || String(e));
     }
-    resp.lendo = false; AL.enviando = false; AL.ctrl = null; guarda(); desenha(true);
+    resp.lendo = false; resp.etapa = "";
   }
 
   // ---------- tela ----------
   const sugestoes = () => {
-    const base = { painel: ["O que falta pagar este mês e quanto vai sobrar?", "Como é calculado o saldo livre?"], lancamentos: ["Quanto gastamos com alimentação este mês?", "Como lanço uma compra parcelada?"], cartoes: ["Quanto está a fatura atual de cada cartão?", "Por que essa compra caiu nessa fatura?"], contas: ["Quais contas estão vencidas?", "O que faço se paguei menos que o previsto?"], planejamento: ["Vamos fechar algum mês no negativo?", "O que são os gastos variáveis estimados?"], dividas: ["Qual dívida vale quitar primeiro?", "Qual a diferença entre 'a negociar' e 'em pagamento'?"], importar: ["Como importo os prints do app do cartão?", "Como o app evita lançamento duplicado?"], investimentos: ["Quanto rendeu nossos investimentos?"], ajustes: ["Para que serve o campo 'Paga com' do cartão?", "Como funcionam as regras de classificação?"] };
-    return [...(base[ui.view] || []), "Explique o que estou vendo nesta tela", "Onde encontro o histórico do que cada um alterou?"].slice(0, 4);
+    const base = { painel: ["O que falta pagar este mês e quanto vai sobrar?", "Como é calculado o saldo livre?"], lancamentos: ["Quanto gastamos com mercado este mês?", "Como lanço uma compra parcelada?"], cartoes: ["Quanto está a fatura de cada cartão?", "Em qual fatura cai uma compra de hoje?"], contas: ["Quais contas estão vencidas?", "Paguei menos que o previsto, e agora?"], planejamento: ["Vamos fechar algum mês no negativo?", "O que são os gastos variáveis estimados?"], dividas: ["Como estão as dívidas?", "Qual a diferença entre a negociar e em pagamento?"], importar: ["Como importo os prints do app do cartão?", "Tem algum lançamento duplicado?"], investimentos: ["Quanto rendeu nossos investimentos?"], ajustes: ["Para que serve o campo 'Paga com' do cartão?", "Como funcionam as regras de classificação?"] };
+    return [...(base[ui.view] || []), "Explique o que estou vendo nesta tela", "Resumo de como estamos"].slice(0, 4);
   };
-  const htmlMsg = (m, i) => m.role === "user" ? `<div class="al-m eu">${esc(m.content)}</div>`
-    : `<div class="al-m ela ${m.erro ? "erro" : ""}" ${i === AL.msgs.length - 1 ? 'id="al-ult"' : ""}>${m.lendo && !m.content ? '<span class="al-dots" aria-label="Alícia está escrevendo"><i></i><i></i><i></i></span>' : md(m.content)}${m.erro ? `<p><button class="al-ir" data-al="tentar">Tentar de novo</button></p>` : ""}</div>`;
+  const htmlMsg = (m, i) => {
+    if (m.role === "user") return `<div class="al-m eu">${m.img ? `<img src="${esc(m.img)}" alt="Imagem anexada">` : ""}${esc(m.content)}</div>`;
+    if (m.perm) return `<div class="al-perm"><b>Posso pedir ajuda à IA gratuita?</b><br>Essa pergunta precisa de mais raciocínio do que os cálculos do app. Posso enviar a pergunta${AL.pend && AL.pend.img ? ", a imagem" : ""} e só os números ligados a ela para a IA gratuita do Google (Gemini). No plano gratuito, o Google pode usar esse conteúdo para melhorar os produtos dele. Fica valendo para as próximas vezes; dá para mudar no rodapé.<div class="acoes"><button data-al="iasim">Sim, pode usar</button><button class="nao" data-al="ianao">Não, só o app</button></div></div>`;
+    const fim = i === AL.msgs.length - 1;
+    const corpo = m.lendo && !m.content ? `<span class="al-dots" aria-label="Alícia está escrevendo"><i></i><i></i><i></i></span>${m.etapa ? ` <span class="al-etapa">${esc(m.etapa)}</span>` : ""}` : md(m.content);
+    const sugs = m.sugs ? `<div class="al-sug" style="margin-top:8px">${m.sugs.map(s => `<button data-al="sug">${esc(s)}</button>`).join("")}</div>` : "";
+    const fonte = !m.lendo && m.content ? `<div class="al-fonte"><span class="tag ${m.fonte === "ia" ? "ia" : ""}">${m.fonte === "ia" ? "Resposta da IA gratuita" : "Resposta do app"}</span>${m.podeIA && fim && !AL.enviando ? `<button class="al-ir" data-al="iaesta">Não era isso? Perguntar à IA</button>` : ""}</div>` : "";
+    return `<div class="al-m ela ${m.erro ? "erro" : ""}" ${fim ? 'id="al-ult"' : ""}>${corpo}${sugs}${fonte}</div>`;
+  };
   function desenha(rolar, soGarante) {
     let fab = document.getElementById("al-fab"), pn = document.getElementById("al-painel");
     const visivel = typeof ui !== "undefined" && ui.screen === "app" && typeof ME !== "undefined" && ME;
     if (!visivel) { if (fab) fab.remove(); if (pn) pn.remove(); return; }
-    if (AL._k !== chave()) carrega();
+    if (AL._k !== chave()) { carrega(); AL.ultimo = null; AL.pend = null; }
     if (!fab) { fab = document.createElement("button"); fab.id = "al-fab"; fab.className = "al-fab"; fab.setAttribute("aria-label", "Falar com a Alícia, assistente do app"); fab.dataset.al = "abrir"; fab.innerHTML = ICONE + '<span class="al-dica">Dúvidas? Fale com a Alícia</span>'; document.body.appendChild(fab); }
     fab.style.display = AL.aberta && matchMedia("(max-width:760px)").matches ? "none" : "";
     fab.setAttribute("aria-expanded", AL.aberta);
@@ -196,27 +222,51 @@
     if (soGarante && pn) return; // o app redesenhou (sincronização etc.): não mexe na conversa nem no que está sendo digitado
     const ta = document.getElementById("al-txt"); if (ta) AL.rascunho = ta.value;
     if (!pn) { pn = document.createElement("section"); pn.id = "al-painel"; pn.className = "al-painel"; pn.setAttribute("role", "dialog"); pn.setAttribute("aria-label", "Conversa com a Alícia"); document.body.appendChild(pn); }
+    const pref = iaPref();
     pn.innerHTML = `<div class="al-top"><div class="al-av">A</div><div class="t"><b>Alícia</b><span>Assistente do Caixa da Família</span></div>${AL.msgs.length ? `<button data-al="nova" title="Começar uma conversa nova">Nova</button>` : ""}<button data-al="fechar" aria-label="Fechar">✕</button></div>
-      <div class="al-log" id="al-log" aria-live="polite">${AL.msgs.length ? AL.msgs.map(htmlMsg).join("") : `<div class="al-oi"><div class="al-m ela"><p>Oi, ${esc((ME.nome || "").split(" ")[0])}! Eu sou a <b>Alícia</b>. Conheço cada tela, campo e regra do Caixa e enxergo os dados de vocês: lançamentos, faturas, contas a pagar, dívidas, previsões.</p><p>Pergunte qualquer coisa, do jeito que vier à cabeça.</p></div><div class="al-sug">${sugestoes().map(s => `<button data-al="sug">${esc(s)}</button>`).join("")}</div></div>`}</div>
-      <form class="al-form" id="al-form"><textarea id="al-txt" rows="1" placeholder="Pergunte para a Alícia…" aria-label="Sua pergunta">${esc(AL.rascunho)}</textarea>${AL.enviando ? `<button type="button" data-al="parar" aria-label="Parar resposta" title="Parar">■</button>` : `<button aria-label="Enviar">${ENVIAR}</button>`}</form>
-      <div class="al-rodape">A Alícia lê os dados da família para responder e pode errar: confira valores importantes.</div>`;
+      <div class="al-log" id="al-log" aria-live="polite">${AL.msgs.length ? AL.msgs.map(htmlMsg).join("") : `<div class="al-oi"><div class="al-m ela"><p>Oi, ${esc((ME.nome || "").split(" ")[0])}! Eu sou a <b>Alícia</b>. Respondo com os números de vocês (faturas, contas a pagar, gastos, dívidas, previsões) e explico qualquer tela, campo ou regra do Caixa.</p><p>Pode perguntar do seu jeito, e anexar um print com o clipe se ajudar.</p></div><div class="al-sug">${sugestoes().map(s => `<button data-al="sug">${esc(s)}</button>`).join("")}</div></div>`}</div>
+      ${AL.img ? `<div class="al-anexo"><img src="${esc(AL.img.thumb)}" alt=""><span>${esc(AL.img.nome)} · será lida junto com a pergunta</span><button data-al="tiraimg" aria-label="Remover imagem">✕</button></div>` : ""}
+      <form class="al-form" id="al-form"><button type="button" class="al-clip" data-al="clipe" aria-label="Anexar imagem" title="Anexar imagem (ou Ctrl+V)">${CLIPE}</button><input type="file" id="al-arq" accept="image/*" class="sr" hidden><textarea id="al-txt" rows="1" placeholder="Pergunte para a Alícia…" aria-label="Sua pergunta">${esc(AL.rascunho)}</textarea>${AL.enviando ? `<button type="button" data-al="parar" aria-label="Parar resposta" title="Parar">■</button>` : `<button aria-label="Enviar">${ENVIAR}</button>`}</form>
+      <div class="al-rodape">Respostas do app usam só os dados deste aparelho. IA gratuita para perguntas difíceis: <b>${iaIndisponivel ? "não instalada" : pref === "sim" ? "ligada" : pref === "nao" ? "desligada" : "pergunta antes"}</b>${iaIndisponivel ? "" : ` · <button data-al="iatroca">${pref === "sim" ? "desligar" : "ligar"}</button>`}</div>`;
     const log = document.getElementById("al-log"); if (rolar && log) log.scrollTop = log.scrollHeight;
     const t = document.getElementById("al-txt"); if (t) { ajusta(t); if (!AL.enviando && !matchMedia("(max-width:760px)").matches) t.focus(); }
   }
-  function atualizaUltima() { const el = document.getElementById("al-ult"), m = AL.msgs[AL.msgs.length - 1], log = document.getElementById("al-log"); if (!el || !m) return desenha(true); const perto = log.scrollHeight - log.scrollTop - log.clientHeight < 80; el.innerHTML = md(m.content); if (perto) log.scrollTop = log.scrollHeight; }
+  function atualizaUltima() { const el = document.getElementById("al-ult"), log = document.getElementById("al-log"); const i = AL.msgs.length - 1, m = AL.msgs[i]; if (!el || !m || m.perm) return desenha(true); const perto = log.scrollHeight - log.scrollTop - log.clientHeight < 80; el.outerHTML = htmlMsg(m, i); if (perto) log.scrollTop = log.scrollHeight; }
   const ajusta = t => { t.style.height = "auto"; t.style.height = Math.min(130, t.scrollHeight) + "px"; };
 
-  document.addEventListener("click", e => {
+  document.addEventListener("click", async e => {
     const b = e.target.closest("[data-al],[data-al-ir]"); if (!b) return;
     if (b.dataset.alIr) { e.preventDefault(); e.stopPropagation(); if (b.dataset.alAj) ui.aj = b.dataset.alAj; if (matchMedia("(max-width:760px)").matches) AL.aberta = false; go(b.dataset.alIr); desenha(); return; }
     const a = b.dataset.al; e.preventDefault();
     if (a === "abrir") { AL.aberta = !AL.aberta; desenha(true); }
     else if (a === "fechar") { AL.aberta = false; desenha(); }
-    else if (a === "nova") { if (AL.ctrl) AL.ctrl.abort(); AL.msgs = []; guarda(); desenha(true); }
+    else if (a === "nova") { if (AL.ctrl) AL.ctrl.abort(); AL.msgs = []; AL.ultimo = null; AL.pend = null; guarda(); desenha(true); }
     else if (a === "sug") enviar(b.textContent);
     else if (a === "parar") { if (AL.ctrl) AL.ctrl.abort(); }
-    else if (a === "tentar") { const m = AL.msgs[AL.msgs.length - 1]; if (m && m.erro) { AL.msgs.pop(); const p = AL.msgs[AL.msgs.length - 1]; if (p && p.role === "user") AL.msgs.pop(); enviar(m.pergunta); } }
+    else if (a === "clipe") document.getElementById("al-arq")?.click();
+    else if (a === "tiraimg") { AL.img = null; desenha(); }
+    else if (a === "iatroca") { setIaPref(iaPref() === "sim" ? "nao" : "sim"); desenha(); }
+    else if (a === "iasim" || a === "ianao") {
+      setIaPref(a === "iasim" ? "sim" : "nao"); const p = AL.pend; AL.pend = null;
+      AL.msgs = AL.msgs.filter(m => !m.perm);
+      if (a === "iasim" && p && !AL.enviando) { const resp = { role: "assistant", content: "", ts: Date.now(), lendo: true }; AL.msgs.push(resp); AL.enviando = true; desenha(true); await perguntaIA(p, resp); AL.enviando = false; AL.ctrl = null; guarda(); }
+      desenha(true);
+    }
+    else if (a === "iaesta" && !AL.enviando) {
+      // a última pergunta, de novo, agora para a IA
+      const iu = AL.msgs.map(m => m.role).lastIndexOf("user"); if (iu < 0) return;
+      const texto = AL.msgs[iu].content, local = AliciaLocal.responder(texto, { ultimo: AL.ultimo });
+      if (iaPref() !== "sim") { AL.pend = { texto, local, img: null, ocr: "" }; AL.msgs.push({ role: "assistant", perm: true, content: "", ts: Date.now() }); desenha(true); return; }
+      const resp = { role: "assistant", content: "", ts: Date.now(), lendo: true }; AL.msgs.push(resp); AL.enviando = true; desenha(true);
+      await perguntaIA({ texto, local, img: null, ocr: "" }, resp); AL.enviando = false; AL.ctrl = null; guarda(); desenha(true);
+    }
   });
+  document.addEventListener("change", e => { if (e.target.id === "al-arq" && e.target.files[0]) { anexa(e.target.files[0]); e.target.value = ""; } });
+  document.addEventListener("paste", e => {
+    if (!AL.aberta || !e.target.closest || !e.target.closest("#al-painel")) return;
+    const f = [...(e.clipboardData ? e.clipboardData.files : [])].find(x => /^image\//.test(x.type));
+    if (f) { e.preventDefault(); e.stopPropagation(); anexa(f); }
+  }, true);
   document.addEventListener("submit", e => { if (e.target.id !== "al-form") return; e.preventDefault(); const t = document.getElementById("al-txt"); enviar(t.value); });
   document.addEventListener("keydown", e => {
     if (e.target.id === "al-txt" && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); enviar(e.target.value); }
@@ -228,6 +278,6 @@
   const renderOriginal = render;
   render = function () { const r = renderOriginal.apply(this, arguments); try { desenha(false, true); } catch (e) { console.error(e); } return r; };
   window.addEventListener("resize", () => { const f = document.getElementById("al-fab"); if (f) f.style.display = AL.aberta && matchMedia("(max-width:760px)").matches ? "none" : ""; });
-  window.alicia = { abrir: () => { AL.aberta = true; desenha(true); }, perguntar: t => { AL.aberta = true; enviar(t); }, contexto };
+  window.alicia = { abrir: () => { AL.aberta = true; desenha(true); }, perguntar: t => { AL.aberta = true; enviar(t); } };
   try { desenha(); } catch (e) {}
 })();
