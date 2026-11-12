@@ -1151,7 +1151,7 @@ function render() {
   if (ui.screen !== "app") { app.className = "app-login"; app.innerHTML = vAuth(); return; }
   estimativas();
   app.className = "app";
-  const primary = ["painel", "lancamentos", "cartoes", "contas"];
+  const primary = ["fechamento", "lancamentos", "cartoes", "contas"];
   app.innerHTML = `<aside class="rail"><div class="brand"><i>R$</i>Caixa da Família</div>
     <nav class="nav" aria-label="Principal">${VIEWS.map(([k, l]) => `<button data-go="${k}" class="${primary.includes(k) ? "" : "sec"}" ${k === ui.view ? 'aria-current="page"' : ""}>${icon(k)}<span>${l}</span></button>`).join("")}<button class="more-btn" data-act="mais" aria-expanded="${ui.more}">${icon("mais")}<span>Mais</span></button></nav>
     <div class="who"><b>${esc(FAM.nome)}</b><span>${esc(ME.nome)} · hoje ${br(TODAY)}</span>${syncBadge()}</div></aside>

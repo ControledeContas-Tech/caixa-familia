@@ -37,7 +37,10 @@ Endereço: https://controledecontas-tech.github.io/caixa-familia/
 
 ## Menu (telas)
 No computador o menu fica à esquerda; no celular, as telas principais ficam na barra de baixo e as demais no botão "Mais". No topo de toda tela: busca de lançamentos, botão "+ Lançamento", sino de notificações e o menu do usuário (Segurança, Sair).
-Telas: Painel, Lançamentos, Cartões, Contas a pagar, Planejamento, Dívidas, Investimentos, Análises, Importar, Conversa, Notificações, Configurações e Administração (só para os administradores gerais).
+Telas: Fechamento, Painel, Lançamentos, Cartões, Contas a pagar, Planejamento, Dívidas, Investimentos, Análises, Importar, Conversa, Notificações, Configurações e Administração (só para os administradores gerais).
+
+## Fechamento (tela inicial)
+A planilha do mês dentro do app: uma coluna por mês (1, 3 ou 6 meses lado a lado) com Entradas (salários e outras receitas), Saídas (cada conta com o dia do vencimento: contas fixas, parcelas de dívidas, faturas de cartão pelo mês de vencimento, contas avulsas), "Contas de meses anteriores" (o que ficou sem pagar), "Gastos do dia a dia" (débito, Pix e dinheiro já gastos), Total e Sobra (entradas − saídas). Mostra também quanto já foi pago, quanto falta pagar e, no mês atual, o saldo previsto em conta no fim do mês. Tocar numa conta registra o pagamento (✓ paga, ½ paga em parte, ! vencida); tocar numa fatura abre o cartão. Embaixo: onde mais gastamos no mês e as dívidas a negociar (no radar, fora das contas). Os dados são os mesmos de Contas a pagar; para incluir uma conta fixa ou salário use "+ Conta fixa ou salário".
 
 ## Painel
 Visão geral com UM filtro de período no topo ("Período do painel": Hoje, Este mês, Este ano, Tudo, Personalizado) que vale para todos os quadros. Cada quadro pode, se quiser, ter o seu próprio período ("Mudar o período deste quadro" / "Padrão deste quadro").
